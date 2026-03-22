@@ -13,6 +13,9 @@ const Home = () => {
   const [selectedDay, setSelectedDay] = useState('01');
   const [selectedStation, setSelectedStation] = useState(null);
   const [detailData, setDetailData] = useState(null);
+  
+  // ✅ 검색어 상태 추가
+  const [searchTerm, setSearchTerm] = useState('');
 
   const mapRef = useRef(null);
   const overlaysRef = useRef([]);
@@ -47,7 +50,6 @@ const Home = () => {
     axios.get("http://localhost:8000/api/stations", { params: { month: selectedMonth } }).then(res => {
       const grouped = res.data.reduce((acc, s) => {
         const line = String(s.호선 || '1').split('_')[0];
-        // 백엔드에서 준 on_total, off_total을 그대로 사용 (쿼리 수정 필요)
         const stationObj = { ...s, name: s.역명 || s.name, line, on_total: s.on_total || 0, off_total: s.off_total || 0 };
         if (!acc[line]) acc[line] = [];
         acc[line].push(stationObj);
@@ -59,27 +61,24 @@ const Home = () => {
   }, [selectedMonth]);
 
   useEffect(() => {
-  if (selectedStation) {
-    // 날짜 포맷팅 (예: 2019-01-01)
-    const fullDate = `${selectedMonth}-${selectedDay.padStart(2, '0')}`;
-    
-    setDetailData(null); // 로딩 중 이전 데이터 가리기
+    if (selectedStation) {
+      const fullDate = `${selectedMonth}-${selectedDay.padStart(2, '0')}`;
+      setDetailData(null); 
 
-    axios.get(`http://localhost:8000/api/station-detail`, { 
-      params: { 
-        station: selectedStation.name, 
-        date: fullDate,
-        line: selectedStation.line // 여기서 '8' 또는 '3' 같은 값이 들어감
-      } 
-    })
-    .then(res => setDetailData(res.data))
-    .catch(err => {
-      console.error("상세 데이터 로드 실패:", err);
-      // 에러 발생 시 UI가 멈추지 않도록 기본값 세팅
-      setDetailData({ on_hourly: [], off_hourly: [], netflow: 0 });
-    });
-  }
-}, [selectedDay, selectedStation, selectedMonth]);
+      axios.get(`http://localhost:8000/api/station-detail`, { 
+        params: { 
+          station: selectedStation.name, 
+          date: fullDate,
+          line: selectedStation.line 
+        } 
+      })
+      .then(res => setDetailData(res.data))
+      .catch(err => {
+        console.error("상세 데이터 로드 실패:", err);
+        setDetailData({ on_hourly: [], off_hourly: [], netflow: 0 });
+      });
+    }
+  }, [selectedDay, selectedStation, selectedMonth]);
 
   useEffect(() => { if (mapLoaded && Object.keys(lineData).length > 0) renderMap(); }, [mapLoaded, lineData, selectedLine, selectedStation]);
 
@@ -98,6 +97,9 @@ const Home = () => {
       const color = lineColors[lineKey] || '#333';
 
       lineData[lineKey].forEach(s => {
+        // 검색어가 있을 때 검색어에 포함되지 않는 역은 지도에서 제외 (선택 사항)
+        if (searchTerm && !s.name.includes(searchTerm)) return;
+
         const isSelected = selectedStation?.name === s.name && selectedStation?.line === s.line;
         const pos = new window.kakao.maps.LatLng(s.lat, s.lng);
 
@@ -123,23 +125,19 @@ const Home = () => {
           yAnchor: 0.5 
         });
 
-        // ✅ 선택된 역의 우선순위를 20으로 높여서 항상 위로 올립니다. (일반 역은 기본값 0)
         if (isSelected) {
           customOverlay.setZIndex(20);
+          mapRef.current.panTo(pos);
         } else {
           customOverlay.setZIndex(0);
         }
 
         customOverlay.setMap(mapRef.current);
         overlaysRef.current.push(customOverlay);
-        
-        // 선택 시 지도를 해당 위치로 부드럽게 이동
-        if (isSelected) mapRef.current.panTo(pos);
       });
     });
   };
 
-  // ✅ 역명과 호선을 모두 받아서 정확한 역을 선택하도록 수정
   window.selectStationByUnique = (name, line) => {
     setSelectedStation(prev => {
       if (prev?.name === name && prev?.line === line) return null;
@@ -148,12 +146,14 @@ const Home = () => {
     });
   };
 
-  const displayStations = selectedLine === '전체' ? Object.values(lineData).flat() : lineData[selectedLine] || [];
+  // ✅ 노선 필터 + 검색어 필터가 적용된 리스트
+  const displayStations = (selectedLine === '전체' ? Object.values(lineData).flat() : lineData[selectedLine] || [])
+    .filter(s => s.name.includes(searchTerm));
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', background: '#fff', overflow: 'hidden' }}>
       {/* 왼쪽: 패널 */}
-      <div style={{ width: '260px', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', padding: '20px', zIndex: 10 }}>
+      <div style={{ width: '280px', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', padding: '20px', zIndex: 10 }}>
         <h3 style={{ margin: '0 0 20px 0', fontSize: '20px', fontWeight: 'bold' }}>Semicolon (;)</h3>
         
         <label style={{ fontSize: '11px', color: '#999' }}>분석 월</label>
@@ -166,26 +166,48 @@ const Home = () => {
 
         <label style={{ fontSize: '11px', color: '#999' }}>노선 필터</label>
         <select value={selectedLine} onChange={(e) => { setSelectedLine(e.target.value); setSelectedStation(null); }} 
-                style={{ padding: '8px', marginBottom: '20px', borderRadius: '4px', border: '1px solid #ddd' }}>
+                style={{ padding: '8px', marginBottom: '10px', borderRadius: '4px', border: '1px solid #ddd' }}>
           <option value="전체">전체 노선</option>
           {['1', '2', '3', '4', '5', '6', '7', '8'].map(n => <option key={n} value={n}>{n}호선</option>)}
         </select>
 
+        {/* ✅ 역 검색창 추가 */}
+        <label style={{ fontSize: '11px', color: '#999', marginTop: '5px' }}>역 이름 검색</label>
+        <div style={{ position: 'relative', marginBottom: '20px' }}>
+          <input 
+            type="text"
+            placeholder="예: 강남, 서울역"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ddd',
+              fontSize: '13px', boxSizing: 'border-box', outline: 'none', background: '#fcfcfc'
+            }}
+          />
+          {searchTerm && (
+            <span onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#ccc' }}>✕</span>
+          )}
+        </div>
+
         <div style={{ flex: 1, overflowY: 'auto', borderTop: '1px solid #eee' }}>
           <ul style={{ listStyle: 'none', padding: 0 }}>
-            {displayStations.sort((a,b) => a.name.localeCompare(b.name)).map((s, idx) => (
-              <li key={idx} onClick={() => window.selectStationByUnique(s.name, s.line)} 
-                  style={{ padding: '10px 8px', cursor: 'pointer', borderBottom: '1px solid #f9f9f9', fontSize: '13px', display: 'flex', alignItems: 'center' }}>
-                <span style={{ color: lineColors[s.line], marginRight: '8px' }}>●</span>
-                <span style={{ 
-                    fontWeight: (selectedStation?.name === s.name && selectedStation?.line === s.line) ? 'bold' : 'normal',
-                    color: (selectedStation?.name === s.name && selectedStation?.line === s.line) ? lineColors[s.line] : '#333' 
-                }}>
-                  {s.name}
-                </span>
-                <span style={{ fontSize: '10px', marginLeft: 'auto', color: '#ccc' }}>{s.line}호선</span>
-              </li>
-            ))}
+            {displayStations.length > 0 ? (
+              displayStations.sort((a,b) => a.name.localeCompare(b.name)).map((s, idx) => (
+                <li key={`${s.name}-${s.line}-${idx}`} onClick={() => window.selectStationByUnique(s.name, s.line)} 
+                    style={{ padding: '10px 8px', cursor: 'pointer', borderBottom: '1px solid #f9f9f9', fontSize: '13px', display: 'flex', alignItems: 'center' }}>
+                  <span style={{ color: lineColors[s.line], marginRight: '8px' }}>●</span>
+                  <span style={{ 
+                      fontWeight: (selectedStation?.name === s.name && selectedStation?.line === s.line) ? 'bold' : 'normal',
+                      color: (selectedStation?.name === s.name && selectedStation?.line === s.line) ? lineColors[s.line] : '#333' 
+                  }}>
+                    {s.name}
+                  </span>
+                  <span style={{ fontSize: '10px', marginLeft: 'auto', color: '#ccc' }}>{s.line}호선</span>
+                </li>
+              ))
+            ) : (
+              <li style={{ padding: '40px 0', textAlign: 'center', color: '#ccc', fontSize: '13px' }}>검색 결과가 없습니다.</li>
+            )}
           </ul>
         </div>
       </div>
@@ -193,13 +215,12 @@ const Home = () => {
       {/* 중앙: 지도 */}
       <div id="map" style={{ flex: 1 }} />
 
-      {/* 오른쪽: 상세 데이터 (환승역 대응) */}
-      <div style={{ width: '400px', borderLeft: '1px solid #eee', background: 'white', padding: '30px' }}>
+      {/* 오른쪽: 상세 데이터 */}
+      <div style={{ width: '400px', borderLeft: '1px solid #eee', background: 'white', padding: '30px', overflowY: 'auto' }}>
         {selectedStation ? (
           <>
             <h2 style={{ margin: '0', fontSize: '28px' }}>{selectedStation.name}</h2>
             
-            {/* ✅ 환승역 호선 선택 탭 */}
             <div style={{ display: 'flex', gap: '8px', margin: '20px 0' }}>
               {Object.values(lineData).flat()
                 .filter(s => s.name === selectedStation.name)
