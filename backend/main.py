@@ -45,14 +45,12 @@ async def analysis_all():
     df = pd.read_sql("SELECT * FROM analysis_mart", con=engine)
     return df.to_dict(orient="records")
 
-# 4. [지하철 위치 데이터] 환승역 분리 및 데이터 정합성 강화 버전
+# 4. [지하철 위치 데이터] 역명 불일치(역 글자, 괄호) 완벽 해결 버전
 @app.get("/api/stations")
 async def get_stations(month: str = "2019-01"):
     try:
         engine = get_engine()
-        # 핵심 수정: 
-        # 1. '호선' 글자 제거(REPLACE)와 타입 통일(CAST) 적용
-        # 2. 정렬 규칙(COLLATE) 강제 지정으로 1267/1271 에러 원천 봉쇄
+        # 핵심 수정: SUBSTRING_INDEX와 REPLACE를 활용해 이름에서 '역'과 '괄호'를 무시하고 매칭
         query = text("""
             SELECT 
                 CAST(REPLACE(P.`호선`, '호선', '') AS CHAR) as 호선, 
@@ -71,8 +69,10 @@ async def get_stations(month: str = "2019-01"):
                 FROM `승차`
                 WHERE `날짜` LIKE :month_pattern
                 GROUP BY `역명`, `호선`
-            ) S_SUM ON S_SUM.`역명` COLLATE utf8mb4_unicode_ci = P.`역명` COLLATE utf8mb4_unicode_ci
-                  AND S_SUM.line_clean COLLATE utf8mb4_unicode_ci = CAST(REPLACE(P.`호선`, '호선', '') AS CHAR) COLLATE utf8mb4_unicode_ci
+            ) S_SUM 
+                ON SUBSTRING_INDEX(REPLACE(S_SUM.`역명`, '역', ''), '(', 1) COLLATE utf8mb4_unicode_ci 
+                 = SUBSTRING_INDEX(REPLACE(P.`역명`, '역', ''), '(', 1) COLLATE utf8mb4_unicode_ci
+                AND S_SUM.line_clean = CAST(REPLACE(P.`호선`, '호선', '') AS CHAR)
             LEFT JOIN (
                 SELECT 
                     `역명`, 
@@ -81,8 +81,10 @@ async def get_stations(month: str = "2019-01"):
                 FROM `하차`
                 WHERE `날짜` LIKE :month_pattern
                 GROUP BY `역명`, `호선`
-            ) H_SUM ON H_SUM.`역명` COLLATE utf8mb4_unicode_ci = P.`역명` COLLATE utf8mb4_unicode_ci
-                  AND H_SUM.line_clean COLLATE utf8mb4_unicode_ci = CAST(REPLACE(P.`호선`, '호선', '') AS CHAR) COLLATE utf8mb4_unicode_ci
+            ) H_SUM 
+                ON SUBSTRING_INDEX(REPLACE(H_SUM.`역명`, '역', ''), '(', 1) COLLATE utf8mb4_unicode_ci 
+                 = SUBSTRING_INDEX(REPLACE(P.`역명`, '역', ''), '(', 1) COLLATE utf8mb4_unicode_ci
+                AND H_SUM.line_clean = CAST(REPLACE(P.`호선`, '호선', '') AS CHAR)
             ORDER BY P.`역명` ASC
         """)
         
@@ -93,14 +95,14 @@ async def get_stations(month: str = "2019-01"):
         print(f"Stations Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 5. [역 상세 분석 조회] 시간대별 데이터 매칭 로직 강화
+# 5. [역 상세 분석 조회] 검색어 패턴 매칭 강화
 @app.get("/api/station-detail")
 async def get_station_detail(station: str, date: str, line: str = None):
     try:
         engine = get_engine()
-        # 프론트에서 넘어온 '3'을 '3호선'으로 안전하게 변환
         line_val = f"{line}호선" if line and '호선' not in line else line
 
+        # LIKE와 REPLACE를 사용해 '서울'로 검색해도 '서울역' 데이터를 가져오도록 개선
         query = text("""
             SELECT 
                 IFNULL(A.`순유입`, 0) as netflow,
@@ -127,7 +129,7 @@ async def get_station_detail(station: str, date: str, line: str = None):
             LEFT JOIN `netflow_table_2019` A 
                 ON A.`역명` COLLATE utf8mb4_unicode_ci = B.`역명` COLLATE utf8mb4_unicode_ci
                 AND A.`날짜` = B.`날짜`
-            WHERE (B.`역명` = :station OR B.`역명` = CONCAT(:station, '역'))
+            WHERE (REPLACE(B.`역명`, '역', '') LIKE CONCAT(:station, '%'))
               AND B.`날짜` = :date
               AND (:line_val IS NULL OR B.`호선` = :line_val)
             LIMIT 1
@@ -146,7 +148,6 @@ async def get_station_detail(station: str, date: str, line: str = None):
         row = df.iloc[0]
         def safe_val(v): return int(v) if pd.notnull(v) and v != '' else 0
 
-        # 시간대별 키 리스트 (순서 주의)
         h_keys = ['pre06','06','07','08','09','10','11','12','13','14','15','16','17','18','19','20','21','22','23','post24']
         on_hourly = [safe_val(row[f'on_{h}']) for h in h_keys]
         off_hourly = [safe_val(row[f'off_{h}']) for h in h_keys]
