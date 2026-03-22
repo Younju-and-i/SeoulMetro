@@ -1,9 +1,12 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
-import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler } from 'chart.js';
+import { Line, Bar } from 'react-chartjs-2';
+import { 
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, 
+  BarElement, Title, Tooltip, Legend, Filler 
+} from 'chart.js';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 const Home = () => {
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -13,9 +16,12 @@ const Home = () => {
   const [selectedDay, setSelectedDay] = useState('01');
   const [selectedStation, setSelectedStation] = useState(null);
   const [detailData, setDetailData] = useState(null);
-  
-  // ✅ 검색어 상태 추가
+  const [covidData, setCovidData] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // ✅ 로딩 상태 추가
+  const [isListLoading, setIsListLoading] = useState(false);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
 
   const mapRef = useRef(null);
   const overlaysRef = useRef([]);
@@ -29,8 +35,7 @@ const Home = () => {
 
   const processHourlyData = (hourlyArray) => {
     if (!hourlyArray || hourlyArray.length < 20) return new Array(11).fill(0);
-    const processed = [];
-    processed.push(hourlyArray[0] || 0);
+    const processed = [hourlyArray[0] || 0];
     for (let i = 1; i <= 17; i += 2) {
       processed.push((hourlyArray[i] || 0) + (hourlyArray[i + 1] || 0));
     }
@@ -38,6 +43,7 @@ const Home = () => {
     return processed;
   };
 
+  // --- 전체 역 목록 로드 ---
   useEffect(() => {
     const KAKAO_MAP_KEY = import.meta.env.VITE_KAKAO_MAP_KEY;
     if (!window.kakao) {
@@ -47,46 +53,51 @@ const Home = () => {
       document.head.appendChild(script);
     } else { setMapLoaded(true); }
 
-    axios.get("http://localhost:8000/api/stations", { params: { month: selectedMonth } }).then(res => {
-      const grouped = res.data.reduce((acc, s) => {
-        const line = String(s.호선 || '1').split('_')[0];
-        const stationObj = { ...s, name: s.역명 || s.name, line, on_total: s.on_total || 0, off_total: s.off_total || 0 };
-        if (!acc[line]) acc[line] = [];
-        acc[line].push(stationObj);
-        return acc;
-      }, {});
-      setLineData(grouped);
-      setSelectedStation(null);
-    });
+    setIsListLoading(true); // 로딩 시작
+    axios.get("http://localhost:8000/api/stations", { params: { month: selectedMonth } })
+      .then(res => {
+        const grouped = res.data.reduce((acc, s) => {
+          const line = String(s.호선 || '1').split('_')[0];
+          if (!acc[line]) acc[line] = [];
+          acc[line].push({ ...s, line });
+          return acc;
+        }, {});
+        setLineData(grouped);
+      })
+      .finally(() => setIsListLoading(false)); // 로딩 종료
   }, [selectedMonth]);
 
+  // --- 상세 데이터 로드 ---
   useEffect(() => {
     if (selectedStation) {
+      setIsDetailLoading(true); // 상세 로딩 시작
       const fullDate = `${selectedMonth}-${selectedDay.padStart(2, '0')}`;
-      setDetailData(null); 
-
-      axios.get(`http://localhost:8000/api/station-detail`, { 
-        params: { 
-          station: selectedStation.name, 
-          date: fullDate,
-          line: selectedStation.line 
-        } 
-      })
-      .then(res => setDetailData(res.data))
-      .catch(err => {
-        console.error("상세 데이터 로드 실패:", err);
-        setDetailData({ on_hourly: [], off_hourly: [], netflow: 0 });
+      
+      const detailReq = axios.get(`http://localhost:8000/api/station-detail`, { 
+        params: { station: selectedStation.역명, date: fullDate, line: selectedStation.line } 
       });
+      const covidReq = axios.get(`http://localhost:8000/api/station-covid`, { 
+        params: { station: selectedStation.역명 } 
+      });
+
+      Promise.all([detailReq, covidReq])
+        .then(([detailRes, covidRes]) => {
+          setDetailData(detailRes.data);
+          setCovidData(covidRes.data);
+        })
+        .finally(() => setIsDetailLoading(false)); // 상세 로딩 종료
     }
   }, [selectedDay, selectedStation, selectedMonth]);
 
-  useEffect(() => { if (mapLoaded && Object.keys(lineData).length > 0) renderMap(); }, [mapLoaded, lineData, selectedLine, selectedStation]);
+  const filteredStations = useMemo(() => {
+    const all = selectedLine === '전체' ? Object.values(lineData).flat() : (lineData[selectedLine] || []);
+    return all.filter(s => s.역명.includes(searchTerm)).sort((a, b) => a.역명.localeCompare(b.역명));
+  }, [lineData, selectedLine, searchTerm]);
 
-  const renderMap = () => {
+  const renderMap = useCallback(() => {
     if (!mapRef.current) {
       mapRef.current = new window.kakao.maps.Map(document.getElementById('map'), { 
-        center: new window.kakao.maps.LatLng(37.5665, 127.02), 
-        level: 8 
+        center: new window.kakao.maps.LatLng(37.5665, 127.02), level: 8 
       });
     }
     overlaysRef.current.forEach(ol => ol.setMap(null));
@@ -95,176 +106,141 @@ const Home = () => {
     Object.keys(lineData).forEach(lineKey => {
       if (selectedLine !== '전체' && lineKey !== selectedLine) return;
       const color = lineColors[lineKey] || '#333';
-
       lineData[lineKey].forEach(s => {
-        // 검색어가 있을 때 검색어에 포함되지 않는 역은 지도에서 제외 (선택 사항)
-        if (searchTerm && !s.name.includes(searchTerm)) return;
-
-        const isSelected = selectedStation?.name === s.name && selectedStation?.line === s.line;
+        if (searchTerm && !s.역명.includes(searchTerm)) return;
+        const isSelected = selectedStation?.역명 === s.역명 && selectedStation?.line === s.line;
         const pos = new window.kakao.maps.LatLng(s.lat, s.lng);
-
         const content = `
-          <div onclick="window.selectStationByUnique('${s.name}', '${s.line}')" style="
-            width: ${isSelected ? '70px' : '14px'}; height: ${isSelected ? '70px' : '14px'}; 
+          <div onclick="window.selectStationByUnique('${s.역명}', '${s.line}')" style="
+            width: ${isSelected ? '70px' : '16px'}; height: ${isSelected ? '70px' : '16px'}; 
             background: ${isSelected ? color : 'white'}; border: 2px solid ${color}; border-radius: 50%;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            color: white; font-size: 10px; font-weight: bold; cursor: pointer; transition: all 0.2s;
-            box-shadow: ${isSelected ? '0 4px 12px rgba(0,0,0,0.3)' : 'none'};
+            color: white; font-size: 10px; cursor: pointer; transition: all 0.2s;
+            box-shadow: ${isSelected ? '0 4px 10px rgba(0,0,0,0.3)' : 'none'};
           ">
-            ${isSelected ? `
-              <div style="font-size:10px; margin-bottom:2px;">${s.name}</div>
-              <div style="border-top:1px solid rgba(255,255,255,0.4); padding-top:2px;">승:${(s.on_total/10000).toFixed(1)}</div>
-              <div>하:${(s.off_total/10000).toFixed(1)}</div>
-            ` : ''}
+            ${isSelected ? `<b>${s.역명}</b><div style="font-size:8px; opacity:0.8;">${(s.on_total/10000).toFixed(1)}만</div>` : ''}
           </div>
         `;
-
-        const customOverlay = new window.kakao.maps.CustomOverlay({ 
-          position: pos, 
-          content, 
-          yAnchor: 0.5 
-        });
-
-        if (isSelected) {
-          customOverlay.setZIndex(20);
-          mapRef.current.panTo(pos);
-        } else {
-          customOverlay.setZIndex(0);
-        }
-
-        customOverlay.setMap(mapRef.current);
-        overlaysRef.current.push(customOverlay);
+        const overlay = new window.kakao.maps.CustomOverlay({ position: pos, content, yAnchor: 0.5 });
+        if (isSelected) { overlay.setZIndex(10); mapRef.current.panTo(pos); }
+        overlay.setMap(mapRef.current);
+        overlaysRef.current.push(overlay);
       });
     });
-  };
+  }, [lineData, selectedLine, selectedStation, searchTerm]);
+
+  useEffect(() => { if (mapLoaded) renderMap(); }, [mapLoaded, renderMap]);
 
   window.selectStationByUnique = (name, line) => {
-    setSelectedStation(prev => {
-      if (prev?.name === name && prev?.line === line) return null;
-      const target = Object.values(lineData).flat().find(s => s.name === name && s.line === line);
-      return target || null;
-    });
+    const target = Object.values(lineData).flat().find(s => s.역명 === name && s.line === line);
+    setSelectedStation(target);
   };
 
-  // ✅ 노선 필터 + 검색어 필터가 적용된 리스트
-  const displayStations = (selectedLine === '전체' ? Object.values(lineData).flat() : lineData[selectedLine] || [])
-    .filter(s => s.name.includes(searchTerm));
-
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', background: '#fff', overflow: 'hidden' }}>
-      {/* 왼쪽: 패널 */}
-      <div style={{ width: '280px', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', padding: '20px', zIndex: 10 }}>
-        <h3 style={{ margin: '0 0 20px 0', fontSize: '20px', fontWeight: 'bold' }}>Semicolon (;)</h3>
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', fontFamily: 'Pretendard, sans-serif' }}>
+      {/* 왼쪽 패널 */}
+      <div style={{ width: '300px', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', padding: '20px', background: '#fff' }}>
+        <h2 style={{ margin: '0 0 5px 0' }}>Semicolon <span style={{color: '#007bff'}}>;</span></h2>
+        {/* ✅ 목록 로딩 상태 표시 */}
+        <p style={{ fontSize: '12px', color: '#007bff', height: '15px', margin: '0 0 15px 0' }}>
+          {isListLoading ? '🔄 역 목록을 업데이트 중...' : ''}
+        </p>
         
-        <label style={{ fontSize: '11px', color: '#999' }}>분석 월</label>
+        <label style={{ fontSize: '11px', color: '#999', fontWeight: 'bold' }}>분석 월</label>
         <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} 
-                style={{ padding: '8px', marginBottom: '10px', borderRadius: '4px', border: '1px solid #ddd' }}>
-          {['2019-01', '2019-02', '2019-03', '2019-04', '2019-05', '2019-06'].map(m => (
-            <option key={m} value={m}>{m.replace('-', '년 ')}월</option>
-          ))}
+                style={{ padding: '8px', marginBottom: '15px', borderRadius: '4px', border: '1px solid #ddd' }}>
+          {['2019-01', '2019-02', '2019-03', '2019-04', '2019-05', '2019-06'].map(m => <option key={m} value={m}>{m}</option>)}
         </select>
 
-        <label style={{ fontSize: '11px', color: '#999' }}>노선 필터</label>
-        <select value={selectedLine} onChange={(e) => { setSelectedLine(e.target.value); setSelectedStation(null); }} 
-                style={{ padding: '8px', marginBottom: '10px', borderRadius: '4px', border: '1px solid #ddd' }}>
+        <label style={{ fontSize: '11px', color: '#999', fontWeight: 'bold' }}>호선 필터</label>
+        <select value={selectedLine} onChange={(e) => setSelectedLine(e.target.value)} 
+                style={{ padding: '8px', marginBottom: '15px', borderRadius: '4px', border: '1px solid #ddd' }}>
           <option value="전체">전체 노선</option>
-          {['1', '2', '3', '4', '5', '6', '7', '8'].map(n => <option key={n} value={n}>{n}호선</option>)}
+          {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={String(n)}>{n}호선</option>)}
         </select>
 
-        {/* ✅ 역 검색창 추가 */}
-        <label style={{ fontSize: '11px', color: '#999', marginTop: '5px' }}>역 이름 검색</label>
-        <div style={{ position: 'relative', marginBottom: '20px' }}>
-          <input 
-            type="text"
-            placeholder="예: 강남, 서울역"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ddd',
-              fontSize: '13px', boxSizing: 'border-box', outline: 'none', background: '#fcfcfc'
-            }}
-          />
-          {searchTerm && (
-            <span onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#ccc' }}>✕</span>
-          )}
-        </div>
+        <input type="text" placeholder="역 검색..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} 
+               style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '20px', outline: 'none' }} />
 
-        <div style={{ flex: 1, overflowY: 'auto', borderTop: '1px solid #eee' }}>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {displayStations.length > 0 ? (
-              displayStations.sort((a,b) => a.name.localeCompare(b.name)).map((s, idx) => (
-                <li key={`${s.name}-${s.line}-${idx}`} onClick={() => window.selectStationByUnique(s.name, s.line)} 
-                    style={{ padding: '10px 8px', cursor: 'pointer', borderBottom: '1px solid #f9f9f9', fontSize: '13px', display: 'flex', alignItems: 'center' }}>
-                  <span style={{ color: lineColors[s.line], marginRight: '8px' }}>●</span>
-                  <span style={{ 
-                      fontWeight: (selectedStation?.name === s.name && selectedStation?.line === s.line) ? 'bold' : 'normal',
-                      color: (selectedStation?.name === s.name && selectedStation?.line === s.line) ? lineColors[s.line] : '#333' 
-                  }}>
-                    {s.name}
-                  </span>
-                  <span style={{ fontSize: '10px', marginLeft: 'auto', color: '#ccc' }}>{s.line}호선</span>
-                </li>
-              ))
-            ) : (
-              <li style={{ padding: '40px 0', textAlign: 'center', color: '#ccc', fontSize: '13px' }}>검색 결과가 없습니다.</li>
-            )}
-          </ul>
+        <div style={{ flex: 1, overflowY: 'auto', opacity: isListLoading ? 0.5 : 1 }}>
+          {filteredStations.map((s, i) => (
+            <div key={i} onClick={() => window.selectStationByUnique(s.역명, s.line)} 
+                 style={{ padding: '12px 10px', cursor: 'pointer', borderBottom: '1px solid #f9f9f9', fontSize: '14px', borderRadius: '6px', marginBottom: '2px',
+                          background: selectedStation?.역명 === s.역명 ? '#eef6ff' : 'transparent', transition: '0.2s' }}>
+              <span style={{ color: lineColors[s.line], marginRight: '10px' }}>●</span> {s.역명}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* 중앙: 지도 */}
+      {/* 중앙 지도 */}
       <div id="map" style={{ flex: 1 }} />
 
-      {/* 오른쪽: 상세 데이터 */}
-      <div style={{ width: '400px', borderLeft: '1px solid #eee', background: 'white', padding: '30px', overflowY: 'auto' }}>
+      {/* 오른쪽 상세 패널 */}
+      <div style={{ width: '400px', borderLeft: '1px solid #eee', padding: '25px', overflowY: 'auto', background: '#fff' }}>
         {selectedStation ? (
-          <>
-            <h2 style={{ margin: '0', fontSize: '28px' }}>{selectedStation.name}</h2>
-            
-            <div style={{ display: 'flex', gap: '8px', margin: '20px 0' }}>
-              {Object.values(lineData).flat()
-                .filter(s => s.name === selectedStation.name)
-                .map(s => (
-                  <button key={s.line} 
-                    onClick={() => setSelectedStation(s)}
-                    style={{
-                      padding: '6px 14px', borderRadius: '20px', border: `1px solid ${lineColors[s.line]}`,
-                      background: selectedStation.line === s.line ? lineColors[s.line] : 'white',
-                      color: selectedStation.line === s.line ? 'white' : lineColors[s.line],
-                      fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', transition: '0.2s'
-                    }}>
-                    {s.line}호선
-                  </button>
-                ))}
+          <div style={{ opacity: isDetailLoading ? 0.5 : 1, transition: '0.3s' }}>
+            {/* ✅ 상세 로딩 상태 표시 */}
+            <div style={{ height: '20px', marginBottom: '5px' }}>
+               {isDetailLoading && <span style={{ fontSize: '12px', color: '#007bff', fontWeight: 'bold' }}>⏳ {selectedStation.역명} 데이터 분석 중...</span>}
             </div>
 
-            <p style={{ color: lineColors[selectedStation.line], fontWeight: 'bold' }}>{selectedStation.line}호선 이용 패턴</p>
-            
-            <div style={{ margin: '20px 0', padding: '15px', background: '#f8f9fa', borderRadius: '8px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 'bold', marginRight: '10px' }}>조회 일자</span>
-              <select value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} style={{ padding: '4px 8px' }}>
+            <h2 style={{ margin: '0' }}>{selectedStation.역명}</h2>
+            <p style={{ color: lineColors[selectedStation.line], fontWeight: '800', marginBottom: '20px' }}>{selectedStation.line}호선 이용 패턴</p>
+
+            <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '12px', marginBottom: '25px', border: '1px solid #eee' }}>
+              <label style={{ fontWeight: 'bold', fontSize: '14px', marginRight: '10px' }}>📅 날짜 선택</label>
+              <select value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px' }}>
                 {Array.from({length: 31}, (_, i) => String(i+1).padStart(2, '0')).map(d => <option key={d} value={d}>{d}일</option>)}
               </select>
             </div>
 
-            <div style={{ height: '300px', marginTop: '30px' }}>
-              <h4 style={{ fontSize: '14px', color: '#666', marginBottom: '15px' }}>🕒 2시간 단위 추이</h4>
+            {/* 바 그래프 undefined 방어 로직 적용 */}
+            <div style={{ height: '200px', marginBottom: '40px' }}>
+              <h4 style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>🕒 시간대별 유동량</h4>
               <Line 
                 data={{
                   labels: timeLabels,
                   datasets: [
-                    { label: '승차', data: processHourlyData(detailData?.on_hourly), borderColor: lineColors[selectedStation.line], tension: 0.4, fill: true, backgroundColor: 'rgba(0,0,0,0.02)' },
-                    { label: '하차', data: processHourlyData(detailData?.off_hourly), borderColor: '#ff9f43', tension: 0.4 }
+                    { label: '승차', data: processHourlyData(detailData?.on_hourly), borderColor: lineColors[selectedStation.line], tension: 0.4, fill: false },
+                    { label: '하차', data: processHourlyData(detailData?.off_hourly), borderColor: '#ff9f43', tension: 0.4, fill: false }
                   ]
                 }}
                 options={{ responsive: true, maintainAspectRatio: false }}
               />
             </div>
-          </>
+
+            <div style={{ height: '180px', marginBottom: '40px' }}>
+              <h4 style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>🗓️ 평일 vs 공휴일 비교</h4>
+              <Bar 
+                data={{
+                  labels: ['평일 평균', '공휴일 평균'],
+                  datasets: [{
+                    label: '이용객 수',
+                    // ✅ undefined 방어: 데이터가 없으면 0으로 처리
+                    data: [detailData?.comparison?.weekday || 0, detailData?.comparison?.holiday || 0],
+                    backgroundColor: [lineColors[selectedStation.line], '#dee2e6'],
+                    borderRadius: 5
+                  }]
+                }}
+                options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }}
+              />
+            </div>
+
+            <div style={{ background: '#eef2ff', padding: '20px', borderRadius: '12px', border: '1px solid #dbeafe' }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '15px', color: '#1e40af' }}>💡 상권 인사이트</h4>
+              <p style={{ fontSize: '13px', color: '#374151', fontWeight: 'bold', marginBottom: '5px' }}>
+                 분류: {detailData?.insight?.type || '데이터 없음'}
+              </p>
+              <p style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.5' }}>
+                 {detailData?.insight?.desc || '데이터를 불러오는 중입니다...'}
+              </p>
+            </div>
+          </div>
         ) : (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#ccc' }}>
-            <div style={{ fontSize: '50px', marginBottom: '20px' }}>📊</div>
-            <p>분석할 역을 선택해 주세요.</p>
+          <div style={{ textAlign: 'center', marginTop: '150px', color: '#adb5bd' }}>
+             <div style={{ fontSize: '50px', marginBottom: '10px' }}>📊</div>
+             <p>분석할 지하철역을<br/>클릭하거나 검색해주세요.</p>
           </div>
         )}
       </div>
