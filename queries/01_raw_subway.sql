@@ -1,140 +1,127 @@
-/* raw_subway table 생성 */
-USE `seoul_metro`;
-CREATE TABLE `raw_subway` AS
-SELECT
-    b.`date`,
-    b.`hour`,
-    b.`station`,
-    b.`line`,
-    b.`boarding`,
-    a.`alighting`
-FROM (
-    -- 🚇 승차 UNPIVOT + 영어 변환
-    SELECT 
-        `날짜` AS `date`,
-        `역명` AS `station`,
-        `호선` AS `line`,
-        '05' AS `hour`,
-        `06:00 이전` AS `boarding`
-    FROM `승차`
+-- =========================
+-- 승차 전체 시간대 INSERT
+-- =========================
 
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '06', `06:00-07:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '07', `07:00-08:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '08', `08:00-09:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '09', `09:00-10:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '10', `10:00-11:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '11', `11:00-12:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '12', `12:00-13:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '13', `13:00-14:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '14', `14:00-15:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '15', `15:00-16:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '16', `16:00-17:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '17', `17:00-18:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '18', `18:00-19:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '19', `19:00-20:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '20', `20:00-21:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '21', `21:00-22:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '22', `22:00-23:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '23', `23:00-24:00` FROM `승차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '24', `24:00 이후` FROM `승차`
-) b
-JOIN (
-    -- 🚇 하차 UNPIVOT + 영어 변환
-    SELECT 
-        `날짜` AS `date`,
-        `역명` AS `station`,
-        `호선` AS `line`,
-        '05' AS `hour`,
-        `06:00 이전` AS `alighting`
-    FROM `하차`
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '05', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`06:00 이전`, 0) + 0, 0 FROM 승차;
 
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '06', `06:00-07:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '07', `07:00-08:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '08', `08:00-09:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '09', `09:00-10:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '10', `10:00-11:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '11', `11:00-12:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '12', `12:00-13:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '13', `13:00-14:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '14', `14:00-15:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '15', `15:00-16:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '16', `16:00-17:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '17', `17:00-18:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '18', `18:00-19:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '19', `19:00-20:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '20', `20:00-21:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '21', `21:00-22:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '22', `22:00-23:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '23', `23:00-24:00` FROM `하차`
-    UNION ALL
-    SELECT `날짜`, `역명`, `호선`, '24', `24:00 이후` FROM `하차`
-) a
-ON b.`date` = a.`date`
-AND b.`station` = a.`station`
-AND b.`line` = a.`line`
-AND b.`hour` = a.`hour`;
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '06', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`06:00-07:00`, 0) + 0, 0 FROM 승차;
 
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '07', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`07:00-08:00`, 0) + 0, 0 FROM 승차;
 
-/* 데이터가 어떻게 들어갔는지 확인하는 용 */
-SELECT
-    station,
-    REPLACE(SUBSTRING_INDEX(station, '(', 1), ' ', '') AS cleaned_station,
-    line,
-    REGEXP_SUBSTR(line, '[0-9]+') AS cleaned_line
-FROM raw_subway
-LIMIT 100;
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '08', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`08:00-09:00`, 0) + 0, 0 FROM 승차;
 
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '09', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`09:00-10:00`, 0) + 0, 0 FROM 승차;
 
-/* 정제를 위한 추가 옵션들 */
-UPDATE raw_subway
-SET station = REPLACE(station, ' ', '');
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '10', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`10:00-11:00`, 0) + 0, 0 FROM 승차;
 
-UPDATE raw_subway
-SET station = SUBSTRING_INDEX(station, '(', 1);
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '11', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`11:00-12:00`, 0) + 0, 0 FROM 승차;
 
-UPDATE raw_subway
-SET station = CONCAT(station, '역')
-WHERE station NOT LIKE '%역';
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '12', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`12:00-13:00`, 0) + 0, 0 FROM 승차;
 
-UPDATE raw_subway
-SET line = REPLACE(line, '호선', '');
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '13', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`13:00-14:00`, 0) + 0, 0 FROM 승차;
 
-UPDATE raw_subway
-SET line = TRIM(line);
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '14', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`14:00-15:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '15', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`15:00-16:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '16', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`16:00-17:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '17', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`17:00-18:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '18', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`18:00-19:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '19', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`19:00-20:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '20', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`20:00-21:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '21', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`21:00-22:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '22', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`22:00-23:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '23', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`23:00-24:00`, 0) + 0, 0 FROM 승차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '24', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), COALESCE(`24:00 이후`, 0) + 0, 0 FROM 승차;
+
+-- =========================
+-- 하차 전체 시간대 INSERT
+-- =========================
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '05', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`06:00 이전`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '06', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`06:00-07:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '07', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`07:00-08:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '08', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`08:00-09:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '09', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`09:00-10:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '10', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`10:00-11:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '11', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`11:00-12:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '12', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`12:00-13:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '13', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`13:00-14:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '14', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`14:00-15:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '15', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`15:00-16:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '16', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`16:00-17:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '17', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`17:00-18:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '18', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`18:00-19:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '19', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`19:00-20:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '20', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`20:00-21:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '21', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`21:00-22:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '22', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`22:00-23:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '23', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`23:00-24:00`, 0) + 0 FROM 하차;
+
+INSERT INTO raw_subway
+SELECT TRIM(`날짜`), '24', TRIM(`역명`), TRIM(REPLACE(`호선`, '호선', '')), 0, COALESCE(`24:00 이후`, 0) + 0 FROM 하차;
