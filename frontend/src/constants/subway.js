@@ -9,4 +9,4 @@ export const TIME_LABELS = [
   '14-16시', '16-18시', '18-20시', '20-22시', '22-24시', '24시 이후'
 ];
 
-export const ANALYSIS_MONTHS = ['2019-01', '2019-02', '2019-03', '2019-04', '2019-05', '2019-06'];
+export const ANALYSIS_MONTHS = [];

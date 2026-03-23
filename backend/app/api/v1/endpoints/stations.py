@@ -148,3 +148,17 @@ async def get_station_covid(station: str):
         return df.to_dict(orient="records")
     except Exception as e:
         return []
+
+# 7 [추가] DB에 존재하는 모든 년-월 목록 조회
+@router.get("/available-dates")
+async def get_available_dates():
+    try:
+        engine = get_engine()
+        # 승차 테이블에서 날짜의 앞 7자리(YYYY-MM)만 중복 없이 추출
+        query = text("SELECT DISTINCT LEFT(`날짜`, 7) as month FROM `승차` ORDER BY month DESC")
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn)
+        return df['month'].tolist()  # ['2021-12', '2021-11', ..., '2019-01'] 형태로 반환
+    except Exception as e:
+        # 에러 발생 시 기본값이라도 반환
+        return ["2019-01", "2019-02", "2019-03", "2019-04", "2019-05", "2019-06"]
