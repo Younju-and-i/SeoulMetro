@@ -34,7 +34,7 @@
 ---
 
 ## 4. 시스템 아키텍처
-CSV → Spark → DB → FastAPI → Streamlit
+CSV → Spark → DB → FastAPI 
 
 
 ### 사용 기술
@@ -42,7 +42,6 @@ CSV → Spark → DB → FastAPI → Streamlit
 - Apache Spark
 - FastAPI
 - MariaDB
-- Streamlit
 
 ---
 
@@ -92,4 +91,3 @@ CSV → Spark → DB → FastAPI → Streamlit
 
 ```bash
 uv run fastapi run
-streamlit run main.py

@@ -1,7 +1,8 @@
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import { BrowserRouter, Routes, Route } from "react-router";
-import Home from '@pages/home.jsx'
+// import Home from '@pages/home.jsx'
+import Map from '@pages/map_v2.jsx'
 
 
 const NotFound = () => {
@@ -16,7 +17,8 @@ const NotFound = () => {
 
 const App = () => {
   const paths = [
-    {path: "/", element: <Home />},
+    // {path: "/", element: <Home />},
+    {path: "/", element: <Map />},
     {path: "*", element: <NotFound />},
   ]
   return (
