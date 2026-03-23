@@ -15,7 +15,7 @@ app.add_middleware(
 
 # [라우터 연결]
 # /api라는 접두사를 붙여서 stations.py의 엔드포인트들을 연결합니다.
-app.include_router(stations.router, prefix="/api")
+app.include_router(stations.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

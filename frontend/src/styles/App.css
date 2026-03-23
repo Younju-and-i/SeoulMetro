@@ -1,0 +1,29 @@
+/* App.css */
+.dashboard-container { display: flex; width: 100vw; height: 100vh; overflow: hidden; background: #f5f7fa; }
+
+/* 왼쪽 */
+.side-panel-left { width: 300px; background: #fff; border-right: 1px solid #eee; padding: 20px; display: flex; flex-direction: column; z-index: 10; }
+.brand-logo { margin-bottom: 5px; font-weight: 800; }
+.loading-text { font-size: 12px; color: #007bff; height: 15px; margin-bottom: 10px; }
+.filter-label { font-size: 11px; color: #999; font-weight: bold; margin-top: 10px; }
+.custom-select, .search-input { padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #ddd; outline: none; }
+
+.station-list { flex: 1; overflow-y: auto; margin-top: 15px; }
+.station-item { padding: 12px 10px; cursor: pointer; border-radius: 6px; font-size: 14px; transition: 0.2s; }
+.station-item:hover { background: #f8f9fa; }
+/* ✅ 선택 시 목록 하이라이트 */
+.station-item.active { background: #eef6ff; color: #007bff; font-weight: bold; border-left: 4px solid #007bff; }
+
+/* 중앙 */
+.map-container { flex: 1; }
+
+/* 오른쪽 */
+.side-panel-right { width: 400px; background: #fff; border-left: 1px solid #eee; padding: 25px; overflow-y: auto; }
+.line-tag { font-weight: 800; font-size: 14px; }
+.date-selector-box { background: #f8f9fa; padding: 15px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #eee; }
+.chart-section { margin-bottom: 30px; }
+.chart-title { font-size: 14px; color: #666; margin-bottom: 10px; }
+.insight-box { background: #eef2ff; padding: 20px; border-radius: 12px; border: 1px solid #dbeafe; }
+.insight-title { color: #1e40af; margin-bottom: 8px; font-size: 15px; }
+.empty-state { text-align: center; margin-top: 150px; color: #adb5bd; }
+.empty-icon { font-size: 50px; }

@@ -3,6 +3,7 @@ import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import { BrowserRouter, Routes, Route } from "react-router";
 // import Home from '@pages/home.jsx'
 import Map from '@pages/map.jsx'
+import '@styles/App.css';
 
 
 const NotFound = () => {
