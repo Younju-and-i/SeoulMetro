@@ -1,226 +1,193 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 import pandas as pd
+import numpy as np
 from sqlalchemy import text
 from app.core.database import get_engine
-# get_insight 서비스가 없는 경우를 대비해 하단에 로직을 포함하거나 임포트 유지
-from app.services.analytics import get_insight 
 
 router = APIRouter()
 
-# 1. [순유입 TOP 10] - 메인 대시보드용
-@router.get("/top-stations")
-async def top_stations():
-    try:
-        engine = get_engine()
-        query = text("""
-            SELECT station as 역명, SUM(net_flow) as net_flow 
-            FROM `03_mart_subway` 
-            GROUP BY station 
-            ORDER BY net_flow DESC LIMIT 10
-        """)
-        with engine.connect() as conn:
-            df = pd.read_sql(query, conn)
-        return df.to_dict(orient="records")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Top-stations Error: {str(e)}")
+# [도움 함수] DB stn_name 컨벤션에 맞게 역 이름 보정
+def format_station_name(name: str) -> str:
+    if not name: return name
+    return name if name.endswith("역") else f"{name}역"
 
-# 2. [전체 역 목록 및 위치 정보] - 지도 마커 렌더링용
-@router.get("/stations")
-async def get_stations(month: str = "2021-12"):
-    try:
-        engine = get_engine()
-        
-        # [수정] 프론트에서 '%Y-%m' 같은 이상한 값이 넘어올 경우 방어
-        if not month or "%" in month or len(month) != 7:
-            # DB에 데이터가 확실히 있는 기본값으로 설정
-            month = "2021-12" 
-
-        start_date = f"{month}-01"
-        end_date = f"{month}-31"
-        
-        # [수정] COLLATE utf8mb4_general_ci를 추가하여 정렬 방식 충돌 해결
-        query = text("""
-            SELECT 
-                P.`호선` as original_line, 
-                P.`역명`, 
-                P.`위도` as lat, 
-                P.`경도` as lng,
-                S.on_total,
-                S.off_total
-            FROM `위치` P
-            INNER JOIN (
-                SELECT 
-                    station, 
-                    line,
-                    SUM(boarding) as on_total,
-                    SUM(alighting) as off_total
-                FROM `02_int_subway`
-                WHERE date >= :start_date AND date <= :end_date
-                GROUP BY station, line
-            ) S ON (
-                -- 양쪽 컬럼의 COLLATE를 통일시켜서 에러 방지
-                REPLACE(P.`역명`, '역', '') COLLATE utf8mb4_general_ci = 
-                REPLACE(S.station, '역', '') COLLATE utf8mb4_general_ci
-                AND 
-                CAST(REGEXP_REPLACE(P.`호선`, '[^0-9]', '') AS UNSIGNED) = 
-                CAST(REGEXP_REPLACE(S.line, '[^0-9]', '') AS UNSIGNED)
-            )
-        """)
-        
-        with engine.connect() as conn:
-            df = pd.read_sql(query, conn, params={"start_date": start_date, "end_date": end_date})
-        
-        if df.empty:
-            return []
-
-        results = []
-        for _, row in df.iterrows():
-            line_num = "".join(filter(str.isdigit, str(row["original_line"])))
-            results.append({
-                "line": line_num,
-                "역명": str(row["역명"]),
-                "lat": float(row["lat"]) if pd.notnull(row["lat"]) else 37.5665,
-                "lng": float(row["lng"]) if pd.notnull(row["lng"]) else 127.0246,
-                "on_total": int(row["on_total"]),
-                "off_total": int(row["off_total"])
-            })
-        return results
-
-    except Exception as e:
-        print(f"Stations Error Detail: {str(e)}") # 서버 터미널에서 확인용
-        raise HTTPException(status_code=500, detail=f"Database Collation Error: {str(e)}")
-
-# 3. [역 상세 분석 리포트] - 핵심 수정 부분
-@router.get("/station-detail")
-async def get_station_detail(station: str, date: str, line: str = None):
-    try:
-        engine = get_engine()
-        # 숫자만 추출 (예: '2호선' -> 2)
-        line_num = int("".join(filter(str.isdigit, str(line)))) if line else None
-
-        # 1) 시간대별 승하차 데이터 조회
-        detail_query = text("""
-                            SELECT hour, boarding, alighting
-                            FROM `02_int_subway`
-                            WHERE REPLACE(station, '역', '') = REPLACE(:station, '역', '') 
-                            AND date = :date 
-                            AND (:line_num IS NULL OR CAST(REGEXP_REPLACE(line, '[^0-9]', '') AS UNSIGNED) = :line_num)
-                            ORDER BY CAST(hour AS UNSIGNED) ASC
-                            """)
-        
-        # 2) 평일/주말 평균 유동량 (비교용)
-        avg_query = text("""
-            SELECT 
-                AVG(daily_boarding) as avg_val,
-                day_type
-            FROM (
-                SELECT date, SUM(boarding) as daily_boarding,
-                       CASE WHEN WEEKDAY(date) >= 5 THEN 'holiday' ELSE 'weekday' END as day_type
-                FROM `02_int_subway`
-                WHERE station = :station 
-                  AND (:line_num IS NULL OR CAST(REGEXP_REPLACE(line, '[^0-9]', '') AS UNSIGNED) = :line_num)
-                GROUP BY date, day_type
-            ) t
-            GROUP BY day_type
-        """)
-
-        with engine.connect() as conn:
-            df = pd.read_sql(detail_query, conn, params={"station": station, "date": date, "line_num": line_num})
-            df_avg = pd.read_sql(avg_query, conn, params={"station": station, "line_num": line_num})
-
-        # 데이터 부재 시 기본 구조 반환 (프론트 크래시 방지)
-        if df.empty:
-            return {
-                "on_hourly": [0]*24, "off_hourly": [0]*24, 
-                "comparison": {"weekday": 0, "holiday": 0},
-                "insight": {"score": 0, "type": "데이터 없음", "growth": "-", "competition": "-", "consumer": "-"}
-            }
-
-        # 0~23시 배열 생성
-        on_hourly = [0] * 24
-        off_hourly = [0] * 24
-        for _, row in df.iterrows():
-            h = int(row['hour'])
-            if 0 <= h < 24:
-                on_hourly[h] = int(row['boarding'])
-                off_hourly[h] = int(row['alighting'])
-
-        avg_dict = df_avg.set_index('day_type')['avg_val'].to_dict()
-        
-        # 인사이트 데이터 생성 (get_insight 함수 결과 활용)
-        total_on = sum(on_hourly)
-        total_off = sum(off_hourly)
-        insight_data = get_insight(on_hourly, off_hourly, total_on - total_off)
-
-        return {
-            "station": station,
-            "line": str(line_num),
-            "on_hourly": on_hourly,
-            "off_hourly": off_hourly,
-            "comparison": {
-                "weekday": int(avg_dict.get('weekday', 0)),
-                "holiday": int(avg_dict.get('holiday', 0))
-            },
-            "insight": {
-                "score": insight_data.get("score", 80),
-                "type": insight_data.get("type", "분석 중"),
-                "growth": insight_data.get("growth", "Normal"),
-                "competition": insight_data.get("competition", "보통"),
-                "consumer": insight_data.get("consumer", "직장인")
-            }
-        }
-    except Exception as e:
-        return {
-            "station": station,
-            "line": line,
-            "on_hourly": [0]*24, 
-            "off_hourly": [0]*24,
-            "comparison": {"weekday": 0, "holiday": 0}, # 이 키가 빠지면 대시보드 차트에서 에러 날 수 있음
-            "insight": {
-                "score": 0, 
-                "type": "에러 발생", 
-                "growth": "-", 
-                "competition": "-", 
-                "consumer": "-"
-            }
-        }
-
-# 4. [DB 가용 날짜 목록] - 최신순 정렬 (수정 버전)
+# 1. [필수] 가용 날짜 리스트 (프런트엔드 초기 로드 시 404 방지)
 @router.get("/available-dates")
 async def get_available_dates():
     try:
         engine = get_engine()
-        # 1. %%Y-%%m 처럼 %를 두 번 써서 파이썬 포맷팅 에러 방지
-        # 2. date가 문자열일 경우를 대비해 DISTINCT LEFT(date, 7) 방식 병행
         query = text("""
-            SELECT DISTINCT LEFT(CAST(date AS CHAR), 7) as month 
-            FROM `02_int_subway` 
-            WHERE date IS NOT NULL 
-            ORDER BY month DESC
+            SELECT DATE_FORMAT(base_date, '%Y-%m') as month 
+            FROM `03_mart_hourly_kpi` 
+            GROUP BY month ORDER BY month DESC
+        """)
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn)
+        return df['month'].tolist()
+    except Exception as e:
+        return ["2021-12"]
+
+# 2. [핵심] 상권 분석 지표 (Map.jsx의 리포트 카드용)
+@router.get("/station/metrics")
+async def get_station_metrics(station_name: str, line_num: int = Query(1)):
+    try:
+        engine = get_engine()
+        target_name = format_station_name(station_name)
+        
+        # 1. 일별 데이터 및 연도별 분석을 위한 쿼리 (가중치 산출용)
+        query = text("""
+            SELECT 
+                YEAR(base_date) as year,
+                base_date,
+                SUM(on_cnt + off_cnt) as daily_total,
+                SUM(on_cnt) as total_on,
+                SUM(off_cnt) as total_off,
+                WEEKDAY(base_date) as day_of_week
+            FROM `03_mart_hourly_kpi`
+            WHERE stn_name = :name AND line_num = :line
+            GROUP BY base_date, year
         """)
         
         with engine.connect() as conn:
-            df = pd.read_sql(query, conn)
+            df = pd.read_sql(query, conn, params={"name": target_name, "line": line_num})
         
-        # 결과값 세척 (None 제거 및 유효한 포맷만 필터링)
-        months = [m for m in df['month'].tolist() if m and len(m) == 7 and m != "%Y-%m"]
+        if df.empty:
+            return {"v2019": 0, "v2020": 0, "v2021": 0, "analysis_score": 0, "location_grade": "N/A"}
+
+        # --- ① 정의서 기반 투자 점수 산출 ---
+        avg_flow = df['daily_total'].mean()
+        flow_score = min(100, (avg_flow / 50000) * 100) # 유동 규모(40%)
         
-        print(f"Fetched Months: {months}") # 서버 로그에서 확인용
-        
-        # 데이터가 하나도 없으면 프론트가 멈추지 않게 실제 DB에 있을 법한 기본값 반환
-        return months if months else ["2021-12", "2021-11", "2021-10"]
-        
+        total_in = df['total_on'].sum()
+        total_out = df['total_off'].sum()
+        nfi = ((total_out - total_in) / (total_in + total_out)) * 100
+        net_in_score = 70 if nfi > 5 else (40 if nfi < -5 else 55)
+        if total_out > total_in: net_in_score += 10 # 유입 집중도(20%) 보정
+
+        cv = df['daily_total'].std() / avg_flow if avg_flow > 0 else 1
+        stability_score = (1 - cv) * 100 # 운영 안정성(25%)
+
+        weekday_avg = df[df['day_of_week'] < 5]['daily_total'].mean()
+        holiday_avg = df[df['day_of_week'] >= 5]['daily_total'].mean()
+        holiday_ratio = (holiday_avg / weekday_avg * 100) if weekday_avg > 0 else 0
+        holiday_score = 100 if holiday_ratio >= 90 else holiday_ratio # 상권 활성도(15%)
+
+        total_score = (0.4 * flow_score) + (0.2 * net_in_score) + (0.25 * stability_score) + (0.15 * holiday_score)
+
+        # --- ② 복수 분석 차트용 연도별 데이터 추출 (NaN 방지) ---
+        v2019 = df[df['year'] == 2019]['daily_total'].mean() if 2019 in df['year'].values else avg_flow
+        v2021 = df[df['year'] == 2021]['daily_total'].mean() if 2021 in df['year'].values else avg_flow
+        recovery_rate = (v2021 / v2019) if v2019 > 0 else 1.0
+
+        return {
+            "v2019": int(v2019),
+            "v2020": int(df[df['year'] == 2020]['daily_total'].mean()) if 2020 in df['year'].values else 0,
+            "v2021": int(v2021),
+            "recovery_rate": round(recovery_rate, 4),
+            "analysis_score": round(total_score, 1), # 스크린샷 상단 '상권 분석 점수'
+            "weekday_avg": int(weekday_avg),
+            "volatility": round(cv, 3),
+            "stability_val": round(stability_score, 1),
+            "commercial_type": "오피스형" if holiday_ratio < 80 else "복합 상권",
+            "recommendation_desc": "간편식, 카페" if holiday_ratio < 80 else "프랜차이즈 식당",
+            "location_grade": "A" if total_score > 80 else "B"
+        }
     except Exception as e:
-        print(f"Date Fetch Error Detail: {e}")
-        # 최후의 수단: 에러 시 프론트엔드 셀렉트박스가 깨지지 않도록 기본 리스트 반환
-        return ["2021-12", "2021-11", "2021-10"]
-    
-# [추가] 프론트엔드 에러 방지용 임시 코로나 API
-@router.get("/station-covid")
-async def get_station_covid(station: str):
+        print(f"Metrics Error: {e}")
+        return {"error": str(e)}
+
+# 3. [차트] 시간대별 패턴 (Map.jsx의 차트 데이터용)
+@router.get("/station/hourly")
+async def get_station_hourly(station_name: str, target_month: str, line_num: int = 1):
     try:
-        # 지금은 데이터가 없으므로 빈 리스트([])를 반환합니다.
-        # 이렇게 하면 프론트엔드의 Promise.all이 "성공"으로 인식해서 대시보드를 그려줍니다.
+        engine = get_engine()
+        target_name = format_station_name(station_name)
+        # 문자열 비교 대신 범위 비교로 인덱스 태우기
+        start_date = f"{target_month}-01"
+        end_date = f"{target_month}-31"
+        
+        query = text("""
+            SELECT hour, AVG(on_cnt) as avg_on, AVG(off_cnt) as avg_off
+            FROM `03_mart_hourly_kpi`
+            WHERE stn_name = :name 
+              AND line_num = :line 
+              AND base_date BETWEEN :start AND :end
+            GROUP BY hour 
+            ORDER BY hour ASC
+        """)
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params={
+                "name": target_name, "line": line_num, 
+                "start": start_date, "end": end_date
+            })
+        return df.to_dict(orient="records")
+    except:
         return []
-    except Exception:
+
+# 4. [히트맵] 공휴일 에러 수정 버전
+@router.get("/station/heatmap")
+async def get_station_heatmap(station_name: str, target_month: str, line_num: int = 1):
+    try:
+        engine = get_engine()
+        target_name = format_station_name(station_name)
+        start_date = f"{target_month}-01"
+        end_date = f"{target_month}-31"
+        
+        # 00_공휴일 테이블의 실제 컬럼명(`날짜`, `공휴일구분`) 반영
+        query = text("""
+            SELECT 
+                DAY(a.base_date) as day, 
+                WEEKDAY(a.base_date) as day_of_week,
+                SUM(a.on_cnt + a.off_cnt) as daily_total, 
+                COALESCE(h.`공휴일구분`, '') as holiday_name 
+            FROM `03_mart_hourly_kpi` a
+            LEFT JOIN `00_공휴일` h ON a.base_date = h.`날짜`
+            WHERE a.stn_name = :name 
+              AND a.line_num = :line 
+              AND a.base_date BETWEEN :start AND :end
+            GROUP BY a.base_date 
+            ORDER BY a.base_date ASC
+        """)
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params={
+                "name": target_name, "line": line_num, 
+                "start": start_date, "end": end_date
+            })
+        return df.to_dict(orient="records")
+    except Exception as e:
+        print(f"Heatmap Error: {e}")
         return []
+
+# 5. [지도] 모든 역 위치 정보
+@router.get("/stations")
+async def get_all_stations():
+    try:
+        engine = get_engine()
+        # GROUP_CONCAT을 사용하여 하나의 역명에 여러 노선을 묶어서 가져옵니다.
+        query = text("""
+            SELECT 
+                s.stn_name as display_name, 
+                GROUP_CONCAT(DISTINCT s.line_num ORDER BY s.line_num ASC) as line_list,
+                MAX(p.위도) as lat, 
+                MAX(p.경도) as lng
+            FROM `03_mart_station_spatial` s
+            JOIN `00_위치` p ON REPLACE(s.stn_name, '역', '') = REPLACE(p.역명, '역', '')
+            GROUP BY s.stn_name
+            ORDER BY s.stn_name ASC
+        """)
+
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn)
+
+        result = df.to_dict(orient="records")
+        for item in result:
+            # SQL에서 바꾼 이름인 line_list를 사용합니다.
+            if item['line_list']:
+                item['lines'] = item['line_list'].split(',') 
+            else:
+                item['lines'] = []
+            
+        return {"data": result}
+    except Exception as e:
+        print(f"Station Load Error: {e}")
+        return {"data": []}
