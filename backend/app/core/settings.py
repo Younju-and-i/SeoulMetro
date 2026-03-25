@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     spark_url: str
     host_ip: str
     file_dir: str
+    frontend_url: str = "http://aiedu.tplinkdns.com:7220"
 
     model_config = SettingsConfigDict(
         env_file=".env",

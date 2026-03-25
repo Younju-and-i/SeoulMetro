@@ -160,8 +160,9 @@ async def get_stations():
                 s.line_num, 
                 p.위도 as lat, 
                 p.경도 as lng
-            FROM `03_mart_station_spatial` s
-            JOIN `00_위치` p ON REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', '')
+            FROM (SELECT stn_name, line_num FROM `03_mart_station_spatial` GROUP BY stn_name, line_num) as s
+            JOIN `00_위치` as p 
+            ON (REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', ''))
             GROUP BY s.stn_name, s.line_num
         """)
         with engine.connect() as conn:

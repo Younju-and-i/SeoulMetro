@@ -1,70 +1,154 @@
 services:
-  web-sub1:
+  # 1. 메인 게이트웨이 및 프론트엔드 서빙
+  web-main:
     image: nginx:1.28
-    container_name: web-sub1
+    container_name: web-main
     ports:
-      - "80:80" 
+      - "80:80"  # 외부 7220 접속 -> 컨테이너 80 전달
+    volumes:
+      - ./config/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - spark-network
+
+  # 2. 프론트엔드 (내부 네트워크용)
+  frontend:
+    image: nginx:1.28
+    container_name: frontend
     volumes:
       - ./frontend/dist:/usr/share/nginx/html:ro
-      - ./frontend/config:/etc/nginx/conf.d:ro
-  backend:
-    image: uv:1
-    container_name: backend
-    volumes:
-      - ./backend:/workspace
-    command: ["uv", "run", "fastapi", "run", "--proxy-headers", "--forwarded-allow-ips", "'*'"]
+      - ./frontend/config/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - spark-network
 
-# 5. 데이터베이스 (PostgreSQL) - 지하철 적재 데이터 저장용
-  db:
-    image: mariadb:12.1.2
-    container_name: db
+  # 3. 백엔드 API (FastAPI)
+  backend:
+    image: uv:3
+    container_name: backend
+    # ports:
+    #   - "8001:8000" # 외부 7221 접속 -> 컨테이너 8001 전달
+    volumes:
+      - ./backend/app:/workspace/app
+      - ./backend/main.py:/workspace/main.py
+      # - ./backend/sub.py:/workspace/sub.py
+      - ./backend/.python-version:/workspace/.python-version
+      - ./backend/pyproject.toml:/workspace/pyproject.toml
+      - ./backend/uv.lock:/workspace/uv.lock
+      - ./backend/uploads:/workspace/uploads
+      - ./backend/mariadb-java-client-3.5.7.jar:/workspace/mariadb-java-client-3.5.7.jar
+      - fastapi-venv:/workspace/.venv
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: seoul_metro
+      - MARIADB_HOST=mariadb
+      - MARIADB_PORT=3306
+      - MARIADB_USER=root
+      - MARIADB_PASSWORD=1234
+      - MARIADB_DB=seoul_metro
+      - SPARK_URL=spark://spark-master:7077
+      - HOST_IP=backend
+      - FILE_DIR=/workspace/uploads
+      - FRONTEND_URL=http://aiedu.tplinkdns.com:7220
+    networks:
+      - spark-network
+    command: ["uv", "run", "fastapi", "run", "main.py", "--proxy-headers", "--forwarded-allow-ips", "'*'"]
+    # command: ["sleep", "infinity"]
+
+  # 5. 데이터베이스 (MariaDB)
+  mariadb:
+    image: mariadb:12.1.2
+    container_name: mariadb
+    environment:
+      - MARIADB_ROOT_PASSWORD=1234
+      # - MARIADB_DATABASE=seoul_metro
+      - TZ=Asia/Seoul
     volumes:
       - data-mariadb:/var/lib/mysql:rw
     ports:
-      - "5432:5432"
+      - "3306:3306"
+    networks:
+      - spark-network
 
-  # 6. Spark Master - 클러스터 관리자
+  # 6~8. Spark 클러스터 (Master & Workers)
   spark-master:
-    image: apache/spark:3.5.0
+    image: my-spark:latest
     container_name: spark-master
+    user: root
     environment:
-      - SPARK_MODE=master
+      # - SPARK_MODE=master
+      # - SPARK_MASTER_PORT=7077
+      # - SPARK_MASTER_HOST=0.0.0.0
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
-    ports:
-      - "8080:8080" # Spark 관리 도구(Web UI)
-      - "7077:7077" # 마스터 통신용
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    # ports:
+    #   - "8080:8080"
+    #   - "7077:7077"
+    #   - "10001:10001"
+    volumes:
+      - spark-master:/opt/spark/work
+    networks:
+      - spark-network
+    command: start-master.sh
 
-  # 7. Spark Worker 1 - 실제 계산 수행
   spark-worker-1:
-    image: apache/spark:3.5.0
+    image: my-spark:latest
     container_name: spark-worker-1
+    user: root
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
+      #- SPARK_MODE=worker
+      #- SPARK_MASTER_URL=spark://spark-master:7077
+      # - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    # ports:
+    #   - "8081:8081"
+    #   - "10002:10002"
+    #   - "11002:11002"
+    volumes:
+      - spark-work-1:/opt/spark/work
     depends_on:
       - spark-master
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    networks:
+      - spark-network
+    command: start-worker.sh spark://spark-master:7077
 
-  # 8. Spark Worker 2 - 실제 계산 수행
   spark-worker-2:
-    image: apache/spark:3.5.0
+    image: my-spark:latest
     container_name: spark-worker-2
+    user: root
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
+      # - SPARK_MODE=worker
+      # - SPARK_MASTER_URL=spark://spark-master:7077
+      # - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    # ports:
+    #   - "8082:8081"
+    #   - "10003:10002"
+    #   - "11003:11002"
+    volumes:
+      - spark-work-2:/opt/spark/work
     depends_on:
       - spark-master
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    networks:
+      - spark-network
+    command: start-worker.sh spark://spark-master:7077
+
+networks:
+  spark-network:
+    driver: bridge
 
 volumes:
-  app2_spark-work-1:
-  app2_spark-work-2:
+  spark-master:
+  spark-work-1:
+  spark-work-2:
+  fastapi-venv:
   data-mariadb:
-    external: true # 기존 Volume 사용 옵션
+    external: true # 사전에 docker volume create data-mariadb 필요

@@ -8,11 +8,17 @@ from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import udf
 from pyspark.sql.types import StringType, StructField, StructType
-from fastapi import FastAPI, BackgroundTasks, File, UploadFile, Query
+from fastapi import APIRouter, BackgroundTasks, File, UploadFile, Query, Request, Depends
 from spark_init import init_spark
 from sqlalchemy import text
-from settings import settings
+from app.core.settings import settings
+from app.core.database import get_engine
 from pyspark.sql import functions as F
+
+router = APIRouter()
+
+def get_spark(request: Request) -> SparkSession:
+  return request.app.state.spark
 
 # --- 3. 공휴일 생성 및 적재 함수 (Spark 활용) ---
 def process_holiday_gen(start_date: str, end_date: str):
@@ -174,9 +180,9 @@ def process_station_master(file_path: Path):
 # --- 6. 엔드포인트 ---
 
 # 1. 업로드(CSV 넣으면 자동으로 승/하차 테이블)
-@app.post("/upload")
+@router.post("/upload")
 async def upload_subway_csv(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    file_path = UPLOAD_DIR / file.filename
+    file_path = settings.file_dir / file.filename
     with file_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     background_tasks.add_task(process_and_insert, file_path, "승차")
@@ -184,10 +190,10 @@ async def upload_subway_csv(background_tasks: BackgroundTasks, file: UploadFile 
     return {"status": "success", "message": f"{file.filename} 적재 시작"}
 
 # 위치 업로드
-@app.post("/upload-station")
+@router.post("/upload-station")
 async def upload_station_master_api(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     # 1. 파일 저장
-    file_path = UPLOAD_DIR / file.filename
+    file_path = settings.file_dir / file.filename
     with file_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
@@ -197,7 +203,7 @@ async def upload_station_master_api(background_tasks: BackgroundTasks, file: Upl
     return {"status": "success", "message": f"{file.filename} 역 마스터 데이터 적재 시작"}
 
 # 공휴일 생성
-@app.post("/generate-holidays")
+@router.post("/generate-holidays")
 async def generate_holidays(
     background_tasks: BackgroundTasks,
     start_date: str = Query(..., example="2017-01-01"),
@@ -208,15 +214,15 @@ async def generate_holidays(
     return {"status": "success", "message": f"{start_date}~{end_date} 공휴일 생성 작업이 시작되었습니다."}
 
 # Spark 불러서 API에서 씀
-@app.get("/api/daily")
-def get_daily():
+@router.get("/api/daily")
+def get_daily(spark: SparkSession = Depends(get_spark)):
     df = spark.sql("SELECT * FROM daily_flow")
     return df.toPandas().to_dict(orient="records")
     
 
 # 리액트로 JSON 전달
-@app.get("/api/station-report/{station_name}")
-async def get_station_report(station_name: str):
+@router.get("/api/station-report/{station_name}")
+async def get_station_report(station_name: str, spark: SparkSession = Depends(get_spark)):
     # Spark 뷰(yearly_flow)에서 해당 역의 데이터만 추출해서 JSON으로 변환
     report_df = spark.sql(f"""
         SELECT 년도, 날짜, 총유동인구, 공휴일구분 
@@ -249,8 +255,8 @@ async def get_station_report(station_name: str):
 # --- 7. view 용 ---
 
 # [유동인구 view]
-@app.get("/test")
-def test():
+@router.get("/test")
+def test(spark: SparkSession = Depends(get_spark)):
     try:
         result = init_spark(spark, get_engine())
         return {"status": True, "data": result}
@@ -258,8 +264,8 @@ def test():
         return {"status": False, "message": str(e)}
     
 # [년도 view]
-@app.get("/test2")
-def test():
+@router.get("/test2")
+def test(spark: SparkSession = Depends(get_spark)):
     try:
         result = init_spark(spark, get_engine())
         return {"status": True, "data": result}
