@@ -7,7 +7,7 @@ import {
 
 import api from '@/api/config';
 import { LINE_COLORS, TIME_LABELS } from '@/constants/subway';
-import '@styles/App.css';
+import '@/styles/App.css'; // 제공해주신 CSS가 저장된 파일명
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, 
@@ -32,6 +32,8 @@ const Map = () => {
   const [detailData, setDetailData] = useState(null); 
   const [compareResults, setCompareResults] = useState([]);
 
+  const [fixedCompareStations, setFixedCompareStations] = useState([]);
+
   const mapRef = useRef(null);
   const overlaysRef = useRef([]);
 
@@ -44,35 +46,55 @@ const Map = () => {
 
   // --- [데이터 가공: 시간대별 패턴 차트] ---
   const processedChartData = useMemo(() => {
-    if (!detailData?.hourly_pattern) return { labels: TIME_LABELS, datasets: [] };
-    const onData = detailData.hourly_pattern.map(d => d.avg_on);
-    const offData = detailData.hourly_pattern.map(d => d.avg_off);
-    return {
-      labels: TIME_LABELS,
-      datasets: [
-        { label: '평균 승차', data: onData, borderColor: '#1890ff', backgroundColor: 'rgba(24, 144, 255, 0.1)', fill: true, tension: 0.4 },
-        { label: '평균 하차', data: offData, borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true, tension: 0.4 }
-      ]
-    };
-  }, [detailData]);
+  if (!detailData?.hourly_pattern || !Array.isArray(detailData.hourly_pattern) || detailData.hourly_pattern.length === 0) {
+    return { labels: [], datasets: [] };
+  }
+
+  const sortedData = [...detailData.hourly_pattern].sort((a, b) => a.hour - b.hour);
+
+  const labels = sortedData.map(d => `${d.hour}시`);
+  const onData = sortedData.map(d => d.avg_on ?? 0);
+  const offData = sortedData.map(d => d.avg_off ?? 0);
+
+  return {
+    labels,
+    datasets: [
+      { 
+        label: '평균 승차', 
+        data: onData, 
+        borderColor: '#1890ff', 
+        backgroundColor: 'rgba(24, 144, 255, 0.1)', 
+        fill: true, 
+        tension: 0.4,
+        pointRadius: 2
+      },
+      { 
+        label: '평균 하차', 
+        data: offData, 
+        borderColor: '#ff4d4f', 
+        backgroundColor: 'rgba(255, 77, 79, 0.1)', 
+        fill: true, 
+        tension: 0.4,
+        pointRadius: 2
+      }
+    ]
+  };
+}, [detailData]);
 
   // --- [히트맵 렌더링 엔진] ---
- const renderHeatmapContent = useCallback(() => {
+  const renderHeatmapContent = useCallback(() => {
   if (!detailData?.heatmap || detailData.heatmap.length === 0) {
     return <div className="placeholder-chart-msg">데이터 대기 중...</div>;
   }
 
   const data = detailData.heatmap;
-  
-  // 1. 최대 유동량 계산 (색상 진하기 결정용)
   const maxFlow = Math.max(...data.map(d => d.count || 0));
-
-  // 2. 첫 날의 요일을 계산하여 앞부분 빈칸(blanks) 생성
-  // 백엔드에서 받은 첫 데이터의 date('2021-12-01') 기준
+  
+  // 💡 시작 요일 계산: 1일이 무슨 요일인지 계산하여 앞에 빈 칸(blanks) 생성
   const firstDate = new Date(data[0].date);
-  // getDay()는 일(0) ~ 토(6). 우리 그리드는 월(0)부터 시작하므로 조정
-  let firstDayShift = firstDate.getDay() - 1; 
-  if (firstDayShift === -1) firstDayShift = 6; // 일요일 처리
+  let firstDayShift = firstDate.getDay(); // 0(일) ~ 6(토)
+  // 월요일 시작 기준으로 맞추기 (일요일이 0이므로 조정)
+  firstDayShift = firstDayShift === 0 ? 6 : firstDayShift - 1;
 
   const blanks = Array.from({ length: firstDayShift }, (_, i) => (
     <div key={`blank-${i}`} style={{ height: '55px', backgroundColor: '#f9f9f9', borderRadius: '4px' }} />
@@ -80,56 +102,36 @@ const Map = () => {
 
   return (
     <div style={{ width: '100%' }}>
-      {/* 범례 (Legend) */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '11px', color: '#666' }}>
-        <span>유동량 낮음</span>
-        <div style={{ display: 'flex', gap: '2px' }}>
-          {[0.1, 0.3, 0.6, 0.9].map(op => (
-            <div key={op} style={{ width: '12px', height: '12px', background: `rgba(24, 144, 255, ${op})`, borderRadius: '2px' }} />
-          ))}
-        </div>
-        <span>높음</span>
-      </div>
-
       {/* 요일 헤더 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginBottom: '8px', textAlign: 'center', fontWeight: 'bold', fontSize: '12px', color: '#888' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontWeight: 'bold', fontSize: '12px', color: '#888', marginBottom: '8px' }}>
         {['월', '화', '수', '목', '금', '토', '일'].map(day => <div key={day}>{day}</div>)}
       </div>
 
-      {/* 히트맵 그리드 */}
       <div className="heatmap-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
         {blanks}
         {data.map((item) => {
           const currentDate = new Date(item.date);
           const dayNum = currentDate.getDate();
-          const dayOfWeek = currentDate.getDay(); // 0(일) ~ 6(토)
-          
           const ratio = item.count / (maxFlow || 1);
-          const bgColor = `rgba(24, 144, 255, ${Math.max(0.05, ratio)})`;
+          const bgColor = `rgba(24, 144, 255, ${Math.max(0.1, ratio)})`;
           
-          // 주말 체크 (토: 6, 일: 0)
-          const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+          // 💡 공휴일/주말 판단 (백엔드에서 준 day_label 활용)
+          const isRedDay = item.day_label === '주말' || item.day_label === '공휴일';
 
           return (
             <div 
               key={item.date} 
               style={{ 
-                height: '55px', 
-                background: bgColor, 
-                borderRadius: '6px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                fontSize: '13px', 
-                border: isWeekend ? '1px solid rgba(255, 77, 79, 0.3)' : '1px solid #eee',
-                position: 'relative',
-                cursor: 'pointer'
+                height: '55px', background: bgColor, borderRadius: '6px', 
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', 
+                fontSize: '13px', border: '1px solid #eee', position: 'relative'
               }} 
-              title={`${item.date} 유동량: ${item.count?.toLocaleString()}명`}
+              title={`${item.date} (${item.day_label}): ${item.count?.toLocaleString()}명`}
             >
-              <span style={{ color: isWeekend ? '#ff4d4f' : '#333', fontWeight: isWeekend ? 'bold' : '500' }}>
-                {dayNum}
+              <span style={{ color: '#333', fontWeight: 'bold' }}>{dayNum}</span>
+              {/* 💡 날짜 아래에 label 표시 */}
+              <span style={{ fontSize: '9px', color: '#6e6b6b', marginTop: '2px' }}>
+                {item.day_label}
               </span>
             </div>
           );
@@ -139,44 +141,79 @@ const Map = () => {
   );
 }, [detailData]);
 
-// --- [분석 실행: 백엔드 API 연동] ---
-const handleRunAnalysis = useCallback(() => {
-  if (!tempSelectedStation) return;
-  setIsLoading(true);
-  
-  Promise.all([
-    api.get('station/metrics', { params: { station_name: tempSelectedStation.display_name, line_num: tempSelectedStation.line } }),
-    api.get('station/hourly', { params: { station_name: tempSelectedStation.display_name, target_month: selectedMonth, line_num: tempSelectedStation.line } }),
-    api.get('station/heatmap', { params: { station_name: tempSelectedStation.display_name, target_month: selectedMonth, line_num: tempSelectedStation.line } })
-  ])
-    .then(([resMetrics, resHourly, resHeatmap]) => {
-      const m = resMetrics.data;
-      
-      setDetailData({
-        stationInfo: tempSelectedStation,
-        metrics: m, // 백엔드 전체 데이터를 담음
-        hourly_pattern: resHourly.data,
-        heatmap: resHeatmap.data,
-        insight: {
-          score: m.analysis_score || 0,
-          grade: m.location_grade || 'B',
-          type: m.commercial_type || '분석 중',
-          recommendations: m.recommendations || [],
-          // 백엔드에 maturity_level이 없으므로 m.commercial_type 등으로 대체하거나 기본값 설정
-          maturity: m.commercial_type ? "데이터 기반" : "Normal" 
-        }
-      });
-    })
-    .catch(err => {
-      console.error("Analysis Error:", err);
-      alert("데이터 분석 중 오류가 발생했습니다.");
-    })
-    .finally(() => setIsLoading(false));
+  // --- [분석 실행 API] ---
+const handleRunAnalysis = useCallback(async () => {
+  if (!tempSelectedStation || !selectedMonth) return;
+  try {
+    setIsLoading(true);
+
+    // 1. 세 가지 API를 동시에 호출 (히트맵 포함)
+    const stnName = tempSelectedStation.display_name;
+    const lineNum = tempSelectedStation.line_num;
+    const targetMonth = selectedMonth.substring(0, 7); // "2021-12-01" -> "2021-12"
+    const targetYear = targetMonth.split('-')[0];    // "2021"
+    const [metricsRes, chartRes, heatmapRes] = await Promise.all([
+      api.get('station/metrics', {
+        params: { station_name: stnName, line_num: lineNum, target_year: targetYear }
+      }),
+      api.get('station/chart-data', {
+        params: { station_name: stnName, line_num: lineNum, target_month: targetMonth  }
+      }),
+      api.get('station/heatmap', { 
+        params: { station_name: stnName, target_month: targetMonth } // YYYY-MM 전달
+      })
+    ]);
+
+    const m = metricsRes.data;
+    const c = chartRes.data;
+    const h = heatmapRes.data;
+
+    if (m.error) {
+      alert(m.error);
+      return;
+    }
+
+    // [수정] 백엔드 응답 필드와 프론트엔드 변수명을 정확히 매칭
+    const formattedDetail = {
+      stationInfo: tempSelectedStation,
+      metrics: {
+        weekday_avg: m.weekday_avg,
+        growth_rate: m.growth_rate,
+        diff_amount: m.diff_amount,
+        volatility: m.volatility,
+        market_maturity: m.market_maturity,
+        v2019: m.v2019 || 0, 
+        v2020: m.v2020 || 0, 
+        recovery_rate: m.recovery_rate || 0
+      },
+      insight: {
+        score: m.analysis_score,
+        grade: m.location_grade,
+        type: m.commercial_type,
+        insight_text: m.insight_text,
+        // 추천 업종 데이터가 없을 경우를 대비한 기본값
+        recommendations: m.recommendations || [
+          { category: "분석 중", desc: "업종 데이터를 불러오는 중입니다." }
+        ]
+      },
+      hourly_pattern: chartRes.data,
+      heatmap: Array.isArray(heatmapRes.data) ? heatmapRes.data : []
+    };
+
+    setDetailData(formattedDetail);
+
+  } catch (error) {
+    console.error("Analysis Error:", error);
+    alert("데이터 분석 로딩 중 오류가 발생했습니다.");
+  } finally {
+    setIsLoading(false);
+  }
 }, [tempSelectedStation, selectedMonth]);
 
   const startComparison = useCallback(() => {
     if (tempCompareStations.length < 2) return alert("비교할 역을 2개 이상 선택해주세요.");
     setIsLoading(true);
+    setFixedCompareStations([...tempCompareStations]);
     const requests = tempCompareStations.map(s => api.get('station/metrics', { params: { station_name: s.display_name, line_num: s.line } }));
     Promise.all(requests)
       .then(res => setCompareResults(res.map(r => r.data)))
@@ -184,7 +221,7 @@ const handleRunAnalysis = useCallback(() => {
       .finally(() => setIsLoading(false));
   }, [tempCompareStations]);
 
-  // --- [데이터 초기 로드 및 필터링] ---
+  // --- [초기 데이터 로드] ---
   useEffect(() => {
     const KAKAO_MAP_KEY = import.meta.env.VITE_KAKAO_MAP_KEY;
     if (!window.kakao) {
@@ -203,23 +240,38 @@ const handleRunAnalysis = useCallback(() => {
     });
   }, []);
 
+// --- [초기 데이터 로드: 역 목록] ---
   useEffect(() => {
     if (!selectedMonth) return;
     setIsLoading(true);
-    api.get('stations').then(res => {
-      const stationsArray = res.data.data || [];
-      const grouped = {};
-      stationsArray.forEach(s => {
-        if (Array.isArray(s.lines)) {
-          s.lines.forEach(lineNum => {
-            const l = String(lineNum);
+
+    api.get('stations')
+      .then(res => {
+        // 1. 데이터가 res.data에 배열로 바로 들어있으므로 이를 사용합니다.
+        const stationsArray = Array.isArray(res.data) ? res.data : (res.data.data || []);
+        
+        const grouped = {};
+        stationsArray.forEach(s => {
+          // 2. 콘솔 확인 결과 키 값이 'line_num'입니다. 이를 문자열로 변환합니다.
+          if (s.line_num) {
+            const l = String(s.line_num);
             if (!grouped[l]) grouped[l] = [];
-            grouped[l].push({ ...s, line: l });
-          });
-        }
-      });
-      setLineData(grouped);
-    }).finally(() => setIsLoading(false));
+            
+            // 데이터 구조를 프론트엔드 형식에 맞춰 push
+            grouped[l].push({
+              ...s,
+              line: l // 필터링에서 사용하는 'line' 키값 생성
+            });
+          }
+        });
+        
+        // console.log("그룹화된 데이터:", grouped); // 확인용
+        setLineData(grouped);
+      })
+      .catch(err => {
+        console.error("역 목록 로드 실패:", err);
+      })
+      .finally(() => setIsLoading(false));
   }, [selectedMonth]);
 
   const filteredStations = useMemo(() => {
@@ -244,7 +296,7 @@ const handleRunAnalysis = useCallback(() => {
     }
   }, [lineData, analysisMode]);
 
-  // --- [지도 마커 렌더링] ---
+  // --- [지도 마커 업데이트] ---
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
     overlaysRef.current.forEach(ol => ol.setMap(null));
@@ -274,8 +326,10 @@ const handleRunAnalysis = useCallback(() => {
     <div className={`consulting-layout ${isLoading ? 'is-loading' : ''}`}>
       {isLoading && (
         <div className="loading-overlay">
-          <div className="spinner"></div>
-          <p>{loadingMessage}</p>
+          <div className="loader-content">
+            <div className="spinner"></div>
+            <p>{loadingMessage}</p>
+          </div>
         </div>
       )}
 
@@ -302,7 +356,7 @@ const handleRunAnalysis = useCallback(() => {
               onClick={() => handleSelectStation(s.display_name, s.line)}
             >
               <span className="dot" style={{ backgroundColor: LINE_COLORS[s.line] }}></span>
-              {s.display_name} <small>({s.line}호선)</small>
+              {s.display_name} <small style={{marginLeft: '5px', fontSize: '11px', opacity: 0.8}}>({s.line}호선)</small>
             </div>
           ))}
         </div>
@@ -326,7 +380,7 @@ const handleRunAnalysis = useCallback(() => {
           )}
         </header>
 
-        {/* Top Section: Map & Summary */}
+        {/* Top Visual Section */}
         <section className="top-visual-row">
           <div id="map" className="map-card" ref={(el) => {
             if (el && mapLoaded && !mapRef.current) {
@@ -338,31 +392,38 @@ const handleRunAnalysis = useCallback(() => {
               <button className={`tab-btn ${analysisMode === 'single' ? 'active' : ''}`} onClick={() => setAnalysisMode('single')}>단일 분석</button>
               <button className={`tab-btn ${analysisMode === 'compare' ? 'active' : ''}`} onClick={() => setAnalysisMode('compare')}>복수 비교</button>
             </div>
+            
             <div className="tab-content">
               {analysisMode === 'single' ? (
                 tempSelectedStation ? (
                   <div className="summary-content">
-                    <span className="line-tag" style={{ backgroundColor: LINE_COLORS[tempSelectedStation.line] }}>{tempSelectedStation.line}호선</span>
-                    <h2>{tempSelectedStation.display_name}역 입지 리포트</h2>
-                    <div className="kpi-summary-box">
-                      <div className="kpi-item"><span>상권 성격</span><strong>{detailData?.insight?.type || '분석 대기'}</strong></div>
-                      <div className="kpi-item"><span>Shock Defense : </span><strong>{detailData?.metrics?.recovery_rate ? `${(detailData.metrics.recovery_rate * 100).toFixed(1)}%` : '-'}</strong></div>
-                      <div className="kpi-section-title">🚀 상권 추천 업종</div>
-                      <div className="recommendation-row">
-                        {detailData?.insight?.recommendations?.map((rec, idx) => (
-                          <div key={idx} className={`rec-card ${idx === 0 ? 'gold' : ''}`}>
-                            <div className="rank">{rec.rank}</div>
-                            <div className="info"><strong>{rec.category}</strong><p>{rec.desc}</p></div>
+                    <span className="dot" style={{ backgroundColor: LINE_COLORS[tempSelectedStation.line], display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', marginRight: '8px' }}></span>
+                    <strong style={{fontSize: '18px'}}>{tempSelectedStation.display_name} 입지 리포트</strong>
+                    
+                    <div className="kpi-summary-box" style={{marginTop: '20px'}}>
+                      <div className="recommend-box">
+                        상권 성격: <strong>{detailData?.insight?.type || '분석 대기'}</strong>
+                      </div>
+                      <p style={{fontSize: '14px', color: '#666', marginBottom: '15px'}}>
+                        위기 방어 지수 (Recovery): <strong>{detailData?.metrics?.recovery_rate ? `${(detailData.metrics.recovery_rate * 100).toFixed(1)}%` : '-'}</strong>
+                      </p>
+                      
+                      <div style={{fontWeight: '700', marginBottom: '10px', color: '#1c2a48'}}>🚀 상권 추천 업종</div>
+                      <div className="recommendation-list" style={{display: 'flex', gap: '10px', marginBottom: '20px'}}>
+                        {detailData?.insight?.recommendations?.slice(0, 2).map((rec, idx) => (
+                          <div key={idx} style={{flex: 1, padding: '10px', background: '#f8f9fa', borderRadius: '8px', fontSize: '12px', borderLeft: '3px solid #1890ff'}}>
+                            <strong>{rec.category}</strong>
+                            <p style={{margin: '4px 0 0', color: '#888'}}>{rec.desc}</p>
                           </div>
                         ))}
                       </div>
                       <button className="start-btn" onClick={handleRunAnalysis}>상권 구조 분석 시작</button>
                     </div>
                   </div>
-                ) : <div className="placeholder-guide">역을 선택하면 상세 리포트가 생성됩니다.</div>
+                ) : <div className="placeholder-guide" style={{textAlign: 'center', padding: '40px', color: '#a0aec0'}}>좌측에서 역을 선택하면 상세 리포트가 생성됩니다.</div>
               ) : (
                 <div className="compare-setup-panel">
-                  <h4>분석 후보지 (최대 3개)</h4>
+                  <h4 style={{marginBottom: '15px'}}>분석 후보지 (최대 3개)</h4>
                   <div className="compare-stations-list">
                     {tempCompareStations.map((s, i) => (
                       <div key={i} className="comp-item-tag">
@@ -370,6 +431,7 @@ const handleRunAnalysis = useCallback(() => {
                         {s.display_name} <button onClick={() => setTempCompareStations(p => p.filter((_, idx) => idx !== i))}>×</button>
                       </div>
                     ))}
+                    {tempCompareStations.length === 0 && <p style={{color: '#a0aec0', fontSize: '13px'}}>지도의 마커를 클릭하여 후보지를 추가하세요.</p>}
                   </div>
                   {tempCompareStations.length >= 2 && <button className="start-btn" onClick={startComparison}>비교 분석 시작</button>}
                 </div>
@@ -378,117 +440,137 @@ const handleRunAnalysis = useCallback(() => {
           </div>
         </section>
 
-        {/* Bottom Section: Dashboard */}
+        {/* Dashboard Content Area */}
         <section className="report-content-area">
           {analysisMode === 'single' && detailData && (
-            <div className="consulting-dashboard">
-              <div className="kpi-section-title">📊 {detailData.stationInfo.display_name} 핵심 지표</div>
-              <div className="core-kpi-grid">
-                <div className="card"><span>전체 입지 등급</span><strong>{detailData.insight.grade}</strong></div>
-                <div className="card"><span>평일 평균 유동량</span><strong>{detailData.metrics.weekday_avg?.toLocaleString()}명</strong></div>
-                <div className="card highlight"><span>유동성(Volatility)</span><strong>{detailData.metrics.volatility?.toFixed(3)}</strong></div>
-                <div className="card"><span>주말 유동 변화</span><strong>{detailData.metrics.holiday_sensitivity < 0 ? '하락형' : '상승형'}</strong></div>
-                <div className="card"><span>상권 성숙도</span><strong>{detailData.insight.maturity}</strong></div>
+            <div className="dashboard-rows">
+              {/* 핵심 KPI 그리드 */}
+              <div style={{display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '15px', marginBottom: '25px'}}>
+                {[
+                  { label: "입지 등급", val: detailData.insight.grade },
+                  { label: "평일 유동량", val: detailData.metrics.weekday_avg?.toLocaleString() + "명" },
+                  { 
+                    label: "전년 대비 성장", 
+                    val: `${detailData.metrics.growth_rate > 0 ? '▲' : '▼'} ${Math.abs(detailData.metrics.growth_rate)}%`,
+                    color: detailData.metrics.growth_rate >= 0 ? '#ff4d4f' : '#1890ff' // 상승 빨강, 하락 파랑
+                  },
+                  { label: "증감 수치", val: `${detailData.metrics.diff_amount?.toLocaleString()}명` },
+                  { label: "상권 성숙도", val: detailData.metrics.market_maturity }
+                ].map((kpi, i) => (
+                  <div key={i} className="card" style={{height: 'auto', padding: '20px', textAlign: 'center'}}>
+                    <span style={{fontSize: '12px', color: '#718096', display: 'block', marginBottom: '8px'}}>{kpi.label}</span>
+                    <strong style={{fontSize: '18px', color: kpi.color || '#2d3748'}}>{kpi.val}</strong>
+                  </div>
+                ))}
               </div>
 
-              <div className="kpi-section-title">📅 일별 활성도 추이 (Heatmap)</div>
-              <div className="pattern-row">
-                <div className="card wide">{renderHeatmapContent()}</div>
-                <div className="card side-summary">
-                  <h4>💡 분석 포인트</h4>
-                  <div className="insight-message">
-                    {detailData.stationInfo.display_name}역은 {detailData.metrics.holiday_sensitivity < 0 ? '전형적인 오피스/출퇴근형' : '주말 유입이 많은 중심상권형'} 입지입니다.
+              {/* 히트맵 및 인사이트 */}
+              <div className="grid-2">
+                <div className="card" style={{height: 'auto'}}>
+                  <h3>📅 일별 활성도 추이 (Heatmap)</h3>
+                  {renderHeatmapContent()}
+                </div>
+                <div className="card" style={{height: 'auto'}}>
+                  <h3>💡 분석 포인트</h3>
+                  {/* 백엔드에서 가공해준 문장을 그대로 출력 */}
+                  <div className="insight-message" style={{ backgroundColor: '#f0f7ff', padding: '15px', borderRadius: '8px', lineHeight: '1.6' }}>
+                    {detailData.insight.insight_text}
+                  </div>
+                  <div style={{marginTop: '20px'}}>
+                    <p style={{fontSize: '13px', marginBottom: '10px'}}>
+                      <strong>추천 전략:</strong> {detailData.metrics.market_maturity === '정체/쇠퇴기' 
+                        ? '신규 확장보다는 기존 고객 유지 및 효율화 전략이 필요합니다.' 
+                        : '적극적인 마케팅을 통한 시장 점유율 확보를 권장합니다.'}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              <div className="kpi-section-title">🔍 시간대별 평균 활성도 패턴</div>
-              <div className="pattern-row">
-                <div className="card">
-                  <h4>🕒 운영 가이드</h4>
-                  <p>피크 시간: <strong>{detailData.insight.type === '오피스형' ? '08:00, 18:00' : '12:00 ~ 15:00'}</strong></p>
-                  <p>수요 집중도: <strong>{detailData.metrics.recovery_rate > 0.8 ? '매우 높음' : '보통'}</strong></p>
-                </div>
-                <div className="card wide">
-                  <div className="chart-container-small">
-                    <Line data={processedChartData} options={{ responsive: true, maintainAspectRatio: false }} />
-                  </div>
-                </div>
-              </div>
-              <div className="kpi-section-title">🛡️ 코로나19 유동인구 충격 지표 (COVID19 Shock Index)</div>
-                <div className="covid-analysis-row">
-                  <div className="card wide">
-                    <div className="chart-container-medium">
-                      <Line 
-                        data={{ 
-                          // 2020년 데이터가 없다면 2021년으로 라벨을 변경하는 것이 좋습니다.
-                          labels: ['2019년 (Pre-COVID)', '2021년 (Recovery)'], 
-                          datasets: [{ 
-                            label: '연평균 유동량', 
-                            // 백엔드에서 준 v2019, v2021 매핑
-                            data: [detailData.metrics.v2019, detailData.metrics.v2021], 
-                            borderColor: '#ff4d4f',
-                            backgroundColor: 'rgba(255, 77, 79, 0.1)', 
-                            fill: true, 
-                            tension: 0.4,
-                            pointRadius: 6,
-                            pointBackgroundColor: '#ff4d4f'
-                          }] 
-                        }} 
+              {/* 시간대별 패턴 차트 및 코로나 충격 분석 */}
+              <div className="grid-2" style={{marginTop: '24px'}}>
+                <div className="card" style={{height: '400px'}}>
+                  <h3>🔍 시간대별 평균 활성도 패턴</h3>
+                  <div className="chart-h">
+                    <Line 
+                        data={processedChartData} 
                         options={{ 
                           responsive: true, 
                           maintainAspectRatio: false,
-                          plugins: { legend: { display: false } },
-                          scales: { 
-                            y: { 
-                              beginAtZero: false, // 0부터 시작하면 변화 폭이 너무 작아 보일 수 있음
-                              ticks: { callback: (v) => v.toLocaleString() + '명' } 
-                            } 
+                          scales: {
+                            y: {
+                              beginAtZero: true, // 0부터 시작
+
+                              ticks: {
+                                callback: (value) => value.toLocaleString() // 천단위 콤마
+                              }
+                            }
+                          },
+                          plugins: {
+                            legend: { position: 'top', align: 'end' }
                           }
                         }} 
                       />
-                    </div>
                   </div>
-                  <div className="card side-summary">
-                    <h4>💡 구조적 충격 해석</h4>
-                    <div className="insight-message" style={{ lineHeight: '1.7', color: '#444', fontSize: '14px' }}>
-                      {/* 백엔드에서 계산된 recovery_rate 활용 */}
-                      코로나19 전후 회복률은 약 <strong>{Math.round((detailData.metrics.recovery_rate || 0) * 100)}%</strong> 수준입니다. 
-                      {detailData.metrics.recovery_rate > 0.8 
-                        ? " 위기에 강한 수요 방어력을 보유하고 있습니다." 
-                        : " 외부 환경 변화에 민감한 구조를 띄고 있습니다."}
+                </div>
+                <div className="card" style={{height: '400px'}}>
+                  <h3>🛡️ 위기 대응력 (COVID 데이터)</h3>
+                  <h6>연간 일평균 유동인구 : 명</h6>
+                  <div className="chart-h" style={{height: '200px'}}>
+                    <Line 
+                      data={{ 
+                        labels: ['Pre-COVID (19)', 'Shock (20)'], 
+                        datasets: [{ 
+                          data: [detailData.metrics.v2019, detailData.metrics.v2020], 
+                          borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true, tension: 0.4 
+                        }] 
+                      }} 
+                      options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} 
+                    />
+                  </div>
+                  <div style={{ marginTop: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px', color: '#888' }}>
+                      <span>Shock Defense Level</span>
+                      <span>{Math.round((detailData.metrics.recovery_rate || 0) * 100)}%</span>
                     </div>
-                    <div className="shock-status" style={{ marginTop: '20px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px', color: '#888' }}>
-                        <span>Shock Defense Level (회복률)</span>
-                        <span>{Math.round((detailData.metrics.recovery_rate || 0) * 100)}%</span>
-                      </div>
-                      <div style={{ width: '100%', height: '8px', background: '#eee', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{ 
-                          width: `${Math.min((detailData.metrics.recovery_rate || 0) * 100, 100)}%`, 
-                          height: '100%', 
-                          background: detailData.metrics.recovery_rate > 0.8 ? '#52c41a' : '#faad14',
-                          transition: 'width 1s ease-in-out'
-                        }} />
-                      </div>
+                    <div style={{ width: '100%', height: '8px', background: '#eee', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ 
+                        width: `${Math.min((detailData.metrics.recovery_rate || 0) * 100, 100)}%`, 
+                        height: '100%', background: detailData.metrics.recovery_rate > 0.8 ? '#52c41a' : '#faad14'
+                      }} />
                     </div>
                   </div>
                 </div>
-        </div>
+              </div>
+            </div>
           )}
 
+          {/* 비교 분석 모드 대시보드 */}
           {analysisMode === 'compare' && compareResults.length > 0 && (
             <div className="compare-dashboard">
-              <div className="kpi-section-title">⚖️ 후보지별 비교 분석</div>
-              <div className="compare-row">
+              <div style={{fontWeight: '700', fontSize: '20px', marginBottom: '20px', color: '#1c2a48'}}>⚖️ 후보지별 비교 분석</div>
+              <div className="row" style={{display: 'flex', gap: '20px'}}>
                 {compareResults.map((data, idx) => (
-                  <div key={idx} className="card">
-                    <span className="comp-tag" style={{ background: LINE_COLORS[tempCompareStations[idx]?.line] }}>{tempCompareStations[idx]?.line}호선</span>
-                    <h3>{tempCompareStations[idx]?.display_name}</h3>
-                    <p>등급: <strong>{data.location_grade}</strong></p>
-                    <p>방어력: <strong>{(data.recovery_rate * 100).toFixed(1)}%</strong></p>
-                    <div style={{ height: '120px' }}>
-                      <Bar data={{ labels: ['19', '20', '21'], datasets: [{ data: [data.v2019, data.v2020, data.v2021], backgroundColor: LINE_COLORS[tempCompareStations[idx]?.line] }] }} options={{ maintainAspectRatio: false }} />
+                  <div key={idx} className="card half" style={{height: 'auto'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
+                      <h3 style={{margin: 0}}>{tempCompareStations[idx]?.display_name}</h3>
+                      <span style={{ padding: '4px 10px', background: LINE_COLORS[tempCompareStations[idx]?.line], color: 'white', borderRadius: '12px', fontSize: '10px' }}>{tempCompareStations[idx]?.line}호선</span>
+                    </div>
+                    <div style={{fontSize: '14px', color: '#444'}}>
+                      <p>입지 등급: <strong>{data.location_grade}</strong></p>
+                      <p>방어력: <strong>{(data.recovery_rate * 100).toFixed(1)}%</strong></p>
+                    </div>
+                    <div style={{ height: '150px', marginTop: '15px' }}>
+                      <Bar 
+                        data={{ 
+                          labels: ['17년','18년','19년', '20년', '21년'], 
+                          datasets: [{ 
+                            label: '유동량',
+                            data: [data.v2017,data.v2018,data.v2019, data.v2020, data.v2021], 
+                            backgroundColor: LINE_COLORS[tempCompareStations[idx]?.line] 
+                          }] 
+                        }} 
+                        options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} 
+                      />
                     </div>
                   </div>
                 ))}

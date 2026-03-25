@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Query, HTTPException
 import pandas as pd
-import numpy as np
 from sqlalchemy import text
 from app.core.database import get_engine
+import traceback
 
 router = APIRouter()
 
 # [도움 함수] 역 이름 컨벤션 통일
 def format_station_name(name: str) -> str:
-    if not name: return name
+    if not name:
+        return name
     return name if name.endswith("역") else f"{name}역"
 
 # 1. 가용 날짜 리스트
@@ -16,163 +17,213 @@ def format_station_name(name: str) -> str:
 async def get_available_dates():
     try:
         engine = get_engine()
-        query = text("SELECT DISTINCT DATE_FORMAT(base_date, '%Y-%m') as month FROM `03_mart_hourly_kpi` ORDER BY month DESC")
+        query = text("SELECT DISTINCT base_ym FROM `03_mart_growth_trend` ORDER BY base_ym DESC")
         with engine.connect() as conn:
             df = pd.read_sql(query, conn)
-        return df['month'].tolist()
+        return df['base_ym'].tolist()
     except Exception as e:
-        print(f"Date Error: {e}")
-        return ["2021-12", "2021-11"]
+        print(f"Date Fetch Error: {e}")
+        return ["2021-12", "2021-11", "2020-12", "2019-12"]
 
-# 2. 상권 지표 (핵심 수정: JOIN 및 CASE문 로직 반영)
-# 2. 상권 지표 (에러 방지 강화 버전)
+# 2. 상권 지표 및 컨설팅 데이터 (최종 보강 버전)
 @router.get("/station/metrics")
-async def get_station_metrics(station_name: str, line_num: int = Query(3)):
+async def get_station_metrics(
+    station_name: str, 
+    line_num: int = Query(2), 
+    target_year: int = Query(2021) 
+):
     try:
         engine = get_engine()
         target_name = format_station_name(station_name)
         
-        # 1. 기초 통계 조회
-        stats_query = text("""
+        # 유동인구 분석 쿼리
+        analysis_query = text("""
             SELECT 
-                AVG(daily_total) as daily_avg,
-                STDDEV(daily_total) as daily_std,
-                AVG(CASE WHEN WEEKDAY(base_date) < 5 THEN daily_total END) as weekday_avg,
-                AVG(CASE WHEN WEEKDAY(base_date) >= 5 THEN daily_total END) as holiday_avg,
-                AVG(CASE WHEN YEAR(base_date) = 2019 THEN daily_total END) as v2019,
-                AVG(CASE WHEN YEAR(base_date) = 2021 THEN daily_total END) as v2021
-            FROM (
-                SELECT base_date, SUM(on_cnt + off_cnt) as daily_total
-                FROM `03_mart_hourly_kpi`
-                WHERE stn_name = :name AND line_num = :line
-                GROUP BY base_date
-            ) t
+                stn_name,
+                line_num,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = :year AND day_label = '평일' THEN (on_cnt + off_cnt) END), 0) AS weekday_avg,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) - 
+                      AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END), 0) AS diff_amount,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2017,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2018,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2019,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2020 THEN (on_cnt + off_cnt) END), 0) AS v2020,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2020 THEN (on_cnt + off_cnt) END), 0) AS v2021,
+                ROUND(STDDEV(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) / 
+                      NULLIF(AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END), 0), 3) AS volatility,
+                CASE 
+                    WHEN (AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) / 
+                          NULLIF(AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END), 0)) > 1.05 THEN '성장기'
+                    WHEN (AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) / 
+                          NULLIF(AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END), 0)) BETWEEN 0.95 AND 1.05 THEN '성숙기'
+                    ELSE '정체/쇠퇴기'
+                END AS market_maturity,
+                ROUND(((AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) - 
+                        AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END)) / 
+                        NULLIF(AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END), 0) * 100), 2) AS growth_rate
+            FROM `03_mart_daily_trend`
+            WHERE stn_name = :name AND line_num = :line
+            GROUP BY stn_name, line_num
         """)
 
-        # 2. 상권 특성 조회
-        mart_query = text("""
-            SELECT 
-                p.morning_ratio, p.evening_ratio,
-                r.total_traffic_score, r.office_score, r.night_life_score, r.recommended_biz,
-                CASE 
-                    WHEN r.office_score > 30 THEN '오피스 집중형'
-                    WHEN r.night_life_score > 25 THEN '유흥/상업 중심형'
-                    ELSE '주거/복합 상권'
-                END AS area_type
-            FROM `03_mart_station_profile` p
-            LEFT JOIN `03_mart_franchise_recommend` r ON p.stn_name = r.stn_name
-            WHERE p.stn_name = :name
-            LIMIT 1
-        """)
+        # 상권 프로필 및 업종 추천 쿼리
+        profile_query = text("""
+                            SELECT 
+                                p.area_type, 
+                                r.base_ym, 
+                                r.total_traffic_score, 
+                                r.office_score, 
+                                r.night_life_score, 
+                                r.recommended_biz
+                            FROM `03_mart_station_profile` p
+                            LEFT JOIN `03_mart_franchise_recommend` r 
+                                ON p.stn_name = r.stn_name AND YEAR(r.base_ym) = :year
+                            WHERE p.stn_name = :name
+                            ORDER BY r.base_ym ASC
+                        """)
         
         with engine.connect() as conn:
-            stats_df = pd.read_sql(stats_query, conn, params={"name": target_name, "line": line_num})
-            mart_df = pd.read_sql(mart_query, conn, params={"name": target_name})
-        
-        # --- [에러 해결 핵심 구간] ---
-        # 1. 데이터 자체가 없는 경우 (Series Ambiguous 에러 원천 차단)
-        if stats_df.empty:
-            return {"error": "데이터가 없습니다.", "analysis_score": 0}
+            analysis_res = pd.read_sql(analysis_query, conn, params={"name": target_name, "line": line_num, "year": target_year})
+            profile_res = pd.read_sql(profile_query, conn, params={"name": target_name})
 
-        # 2. iloc[0]으로 한 행만 추출한 뒤, 개별 값이 NaN인지 체크
-        s = stats_df.iloc[0]
-        if pd.isna(s['daily_avg']):
-            return {"error": "조회된 통계값이 없습니다.", "analysis_score": 0}
+        if analysis_res.empty:
+            raise HTTPException(status_code=404, detail=f"{target_name}에 대한 분석 데이터를 찾을 수 없습니다.")
 
-        # 3. mart_df 처리
-        m = mart_df.iloc[0] if not mart_df.empty else None
+        a_row = analysis_res.iloc[0]
+        p_row = profile_res.iloc[0] if not profile_res.empty else {}
+
+        # 추천 업종 데이터 가공 (이 부분이 프론트의 '분석 중'을 해결합니다)
+        biz_name = p_row.get('recommended_biz')
+        office_score = float(p_row.get('office_score', 0) or 0)
+        night_score = float(p_row.get('night_life_score', 0) or 0)
         
-        # --- [안전한 데이터 가공] ---
-        daily_avg = float(s['daily_avg'] or 0)
-        daily_std = float(s['daily_std'] or 0)
-        cv = daily_std / daily_avg if daily_avg > 0 else 0
-        
-        # 프론트엔드와 100% 일치하는 키값 전달
+        recommendations = []
+        if biz_name:
+            reason = "오피스 상권 중심 전략 추천" if office_score > night_score else "저녁/주말 상권 특화 전략 추천"
+            recommendations.append({
+                "category": str(biz_name),
+                "desc": reason
+            })
+        else:
+            recommendations.append({"category": "데이터 없음", "desc": "추천 업종 정보를 불러올 수 없습니다."})
+
+        # 입지 등급 계산
+        traffic = float(p_row.get('total_traffic_score', 0) or 0)
+        avg_score = (traffic + office_score + night_score) / 3
+        grade = "S" if avg_score >= 19.0 else ("A" if avg_score >= 16.5 else "B")
+
+        # 인사이트 텍스트
+        d_amount = int(a_row['diff_amount'] or 0)
+        status_text = "감소" if d_amount < 0 else "증가"
+        insight = f"{target_name}은 {target_year}년 기준 전년 대비 유동인구가 약 {abs(d_amount):,}명 {status_text}하였습니다."
+
         return {
-            "v2019": int(s['v2019'] or daily_avg),
-            "v2021": int(s['v2021'] or daily_avg),
-            "weekday_avg": int(s['weekday_avg'] or 0),
-            "recovery_rate": round(float(s['v2021'] or 1) / float(s['v2019'] or 1), 2),
-            "volatility": round(cv, 3),
-            "stability_val": round((1 - cv) * 100, 1),
-            "holiday_sensitivity": round(float(s['holiday_avg'] or 0) / float(s['weekday_avg'] or 1), 2), # 추가
-            "analysis_score": int(float(m['total_traffic_score'] or 0) * 10) if m is not None else 50,
-            "commercial_type": str(m['area_type']) if m is not None else "복합 상권",
-            "recommendation_desc": f"{m['recommended_biz'] if m is not None else '일반 음식점'} 추천",
-            "location_grade": "A" if (m is not None and float(m['total_traffic_score'] or 0) > 5) else "B",
-            "recommendations": [
-                {"rank": "1st", "category": "추천", "desc": m['recommended_biz'] if m is not None else "데이터 분석 중"},
-                {"rank": "2nd", "category": "특성", "desc": f"오전 유입 {m['morning_ratio'] if m is not None else 0}%"}
-            ]
+            "station_name": str(a_row['stn_name']),
+            "weekday_avg": int(a_row['weekday_avg'] or 0),
+            "growth_rate": float(a_row['growth_rate'] or 0),
+            "diff_amount": d_amount,
+            "volatility": float(a_row['volatility'] or 0),
+            "market_maturity": str(a_row['market_maturity']),
+            "location_grade": grade,
+            "analysis_score": round(float(avg_score * 4.4), 1),
+            "commercial_type": str(p_row.get('area_type', '복합 상권')),
+            "insight_text": insight,
+            "v2017": int(a_row['v2017'] or 0), 
+            "v2018": int(a_row['v2018'] or 0), 
+            "v2019": int(a_row['v2019'] or 0), 
+            "v2020": int(a_row['v2020'] or 0),
+            "v2021": int(a_row['v2021'] or 0),
+            "recovery_rate": round(int(a_row['v2020'] or 0) / int(a_row['v2019'] or 1), 2),
+            "recommendations": recommendations  # 리스트 형태로 전달
         }
     except Exception as e:
-        # 에러 로그를 더 자세히 찍도록 수정
-        import traceback
-        print(f"Metrics Error Detail: {traceback.format_exc()}")
-        return {"error": str(e), "analysis_score": 0}
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"서버 내부 오류: {str(e)}")
 
-# 3. 역 목록 (조인 조건 최적화)
+# 3. 전체 역 목록
 @router.get("/stations")
-async def get_all_stations():
+async def get_stations():
     try:
         engine = get_engine()
         query = text("""
-            SELECT s.stn_name as display_name, 
-                   GROUP_CONCAT(DISTINCT s.line_num ORDER BY s.line_num ASC) as line_list,
-                   MAX(p.위도) as lat, MAX(p.경도) as lng
+            SELECT 
+                s.stn_name as display_name, 
+                s.line_num, 
+                p.위도 as lat, 
+                p.경도 as lng
             FROM `03_mart_station_spatial` s
-            JOIN `00_위치` p ON REPLACE(s.stn_name, '역', '') = REPLACE(p.역명, '역', '')
-            GROUP BY s.stn_name 
-            ORDER BY s.stn_name ASC
+            JOIN `00_위치` p ON REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', '')
+            GROUP BY s.stn_name, s.line_num
         """)
         with engine.connect() as conn:
             df = pd.read_sql(query, conn)
-        
-        result = df.to_dict(orient="records")
-        for item in result:
-            item['lines'] = item['line_list'].split(',') if item['line_list'] else []
-        return {"data": result}
+        return {"data": df.to_dict(orient='records')}
     except Exception as e:
         return {"data": [], "error": str(e)}
 
-# 4. 시간대별 패턴 (안정성 강화)
-@router.get("/station/hourly")
-async def get_station_hourly(station_name: str, target_month: str, line_num: int = Query(3)):
+# 4. 차트 데이터 (필요할 때만 호출)
+@router.get("/station/chart-data")
+async def get_station_chart_data(
+    station_name: str, 
+    target_month: str, 
+    line_num: int = Query(...)  # 필수 값으로 변경
+):
     try:
         engine = get_engine()
         target_name = format_station_name(station_name)
+        # 시간순(ORDER BY hour) 정렬 추가
         query = text("""
-            SELECT hour, AVG(on_cnt) as avg_on, AVG(off_cnt) as avg_off 
-            FROM `03_mart_hourly_kpi` 
-            WHERE stn_name = :name 
-              AND line_num = :line
-              AND DATE_FORMAT(base_date, '%Y-%m') = :month 
-            GROUP BY hour ORDER BY hour ASC
+            SELECT 
+                hour,
+                ROUND(AVG(day_on), 0) AS avg_on,
+                ROUND(AVG(day_off), 0) AS avg_off
+            FROM (
+                SELECT 
+                    base_date,
+                    hour,
+                    SUM(on_cnt) AS day_on,
+                    SUM(off_cnt) AS day_off
+                FROM `03_mart_hourly_kpi`
+                WHERE stn_name = :name
+                AND line_num = :line
+                AND DATE_FORMAT(base_date, '%Y-%m') = :month
+                GROUP BY base_date, hour
+            ) t
+            GROUP BY hour
+            ORDER BY hour ASC;
         """)
         with engine.connect() as conn:
             df = pd.read_sql(query, conn, params={"name": target_name, "month": target_month, "line": line_num})
-        # NaN 값을 0으로 채워 프론트엔드 에러 방지
-        df = df.fillna(0)
-        return df.to_dict(orient="records")
-    except: return []
+        
+        if df.empty:
+            return []
+            
+        # 모든 값을 순수 int로 변환하여 리스트로 반환
+        return df.astype(int).to_dict(orient="records")
+    except Exception as e:
+        print(f"Chart Data Error: {e}")
+        return []
 
-# 5. 히트맵 데이터 (날짜 형식 준수)
+# 5. 히트맵
 @router.get("/station/heatmap")
-async def get_station_heatmap(station_name: str, target_month: str, line_num: int = Query(3)):
+async def get_station_heatmap(station_name: str, target_month: str):
     try:
         engine = get_engine()
-        target_name = format_station_name(station_name)
         query = text("""
             SELECT 
                 DATE_FORMAT(base_date, '%Y-%m-%d') as date, 
-                SUM(on_cnt + off_cnt) as count 
-            FROM `03_mart_hourly_kpi` 
-            WHERE stn_name = :name 
-              AND line_num = :line
-              AND DATE_FORMAT(base_date, '%Y-%m') = :month 
-            GROUP BY base_date ORDER BY base_date ASC
+                CAST(SUM(on_cnt + off_cnt) AS SIGNED) as count,
+                MAX(day_label) as day_label
+            FROM `03_mart_daily_trend`
+            WHERE stn_name = :name AND base_date LIKE :month_pattern
+            GROUP BY date
+            ORDER BY date ASC
         """)
         with engine.connect() as conn:
-            df = pd.read_sql(query, conn, params={"name": target_name, "month": target_month, "line": line_num})
+            df = pd.read_sql(query, conn, params={
+                "name": format_station_name(station_name),
+                "month_pattern": f"{target_month}%"
+            })
         return df.to_dict(orient="records")
-    except: return []
+    except Exception as e:
+        return {"error": str(e)}
