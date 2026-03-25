@@ -110,3 +110,76 @@
 .loader-content p { font-size: 18px; font-weight: 600; }
 
 .is-loading { pointer-events: none; user-select: none; }
+
+/* --- 추가된 스타일 영역 --- */
+
+/* 히트맵 레이아웃 */
+.heatmap-container { width: 100%; }
+.heatmap-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  text-align: center;
+  font-weight: bold;
+  font-size: 12px;
+  color: #888;
+  marginBottom: 8px;
+}
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.heatmap-blank {
+  height: 55px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+.heatmap-cell {
+  height: 55px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border: 1px solid #eee;
+  position: relative;
+}
+.heatmap-date { color: #333; font-weight: bold; }
+.heatmap-label { fontSize: 9px; color: #6e6b6b; margin-top: 2px; }
+
+/* 단일 분석 상단 요약 */
+.summary-title { font-size: 18px; font-weight: 700; color: #1c2a48; }
+.kpi-summary-box { margin-top: 20px; }
+.recovery-text { font-size: 14px; color: #666; margin-bottom: 15px; }
+.recommend-title { font-weight: 700; margin-bottom: 10px; color: #1c2a48; }
+.recommendation-list { display: flex; gap: 10px; margin-bottom: 20px; }
+.recommend-card {
+  flex: 1;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  font-size: 12px;
+  border-left: 3px solid #1890ff;
+}
+.recommend-card p { margin: 4px 0 0; color: #888; }
+
+/* 비교 분석 UI */
+.compare-title { font-weight: 700; font-size: 20px; margin-bottom: 20px; color: #1c2a48; }
+.compare-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+.line-badge { padding: 4px 10px; color: white; border-radius: 12px; font-size: 10px; }
+.compare-info { font-size: 14px; color: #444; }
+.compare-chart-wrapper { height: 150px; margin-top: 15px; }
+
+/* 기타 공통 */
+.placeholder-guide { text-align: center; padding: 40px; color: #a0aec0; }
+.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 25px; }
+.kpi-card { height: auto !important; padding: 20px; text-align: center; }
+.kpi-label { font-size: 12px; color: #718096; display: block; margin-bottom: 8px; }
+.kpi-value { font-size: 18px; color: #2d3748; }
+
+.recovery-progress-container { margin-top: 20px; }
+.progress-info { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; color: #888; }
+.progress-bar-bg { width: 100%; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+.progress-bar-fill { height: 100%; transition: width 0.5s ease; }
