@@ -7,7 +7,8 @@ app = FastAPI(title="Subway Analysis API")
 # [CORS 설정]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173",
+                   "http://aiedu.tplinkdns.com:7220"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
