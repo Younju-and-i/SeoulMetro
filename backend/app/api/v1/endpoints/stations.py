@@ -83,9 +83,18 @@ async def get_station_metrics(
                         """)
         
         with engine.connect() as conn:
-            analysis_res = pd.read_sql(analysis_query, conn, params={"name": target_name, "line": line_num, "year": target_year})
-            profile_res = pd.read_sql(profile_query, conn, params={"name": target_name})
+            analysis_res = pd.read_sql(
+                analysis_query, 
+                conn, 
+                params={"name": target_name, "line": line_num, "year": target_year}
+            )
+            profile_res = pd.read_sql(
+                profile_query, 
+                conn, 
+                params={"name": target_name, "year": target_year}
+            )
 
+        # 분석 데이터가 없으면 404
         if analysis_res.empty:
             raise HTTPException(status_code=404, detail=f"{target_name}에 대한 분석 데이터를 찾을 수 없습니다.")
 
@@ -170,7 +179,7 @@ async def get_station_chart_data(
 ):
     try:
         engine = get_engine()
-        target_name = format_station_name(station_name)
+        target_name = station_name
         # 시간순(ORDER BY hour) 정렬 추가
         query = text("""
             SELECT 

@@ -521,10 +521,25 @@ const handleRunAnalysis = useCallback(async () => {
                         labels: ['Pre-COVID (19)', 'Shock (20)'], 
                         datasets: [{ 
                           data: [detailData.metrics.v2019, detailData.metrics.v2020], 
-                          borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true, tension: 0.4 
+                          borderColor: '#ff4d4f', 
+                          backgroundColor: 'rgba(255, 77, 79, 0.1)', 
+                          fill: true, 
+                          tension: 0.4 
                         }] 
                       }} 
-                      options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} 
+                      options={{ 
+                        responsive: true, 
+                        maintainAspectRatio: false, 
+                        plugins: { 
+                          legend: { display: false } 
+                        },
+                        scales: {
+                          y: {
+                            min: 0,       // Y축 최소값
+                            max: 200000   // Y축 최대값
+                          }
+                        }
+                      }} 
                     />
                   </div>
                   <div style={{ marginTop: '20px' }}>
