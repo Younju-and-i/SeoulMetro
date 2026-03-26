@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import api from '@/api/config';
+import api from '@api/config.js';
 
 export const useSubwayData = () => {
   const [mapLoaded, setMapLoaded] = useState(false);

@@ -1,32 +1,43 @@
 import React, { useEffect, useCallback, useMemo } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
+import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler, RadialLinearScale } from 'chart.js';
-import api from '@/api/config';
-import { LINE_COLORS } from '@/constants/subway';
-import { useSubwayData } from '@/hooks/useSubwayData';
-import Sidebar from '@/components/Map/Sidebar';
-import Heatmap from '@/components/Map/Heatmap';
-import '@/styles/App.css';
+import api from '@api/config.js';
+import { LINE_COLORS } from '@constants/subway.js';
+import { useSubwayData } from '@hooks/useMapData.js';
+import Sidebar from '@components/Map/Sidebar.jsx';
+import Heatmap from '@components/Map/Heatmap.jsx';
+import ComparisonReport from '@components/Map/ComparisonReport.jsx'; // 분리된 컴포넌트 임포트
+import '@styles/App.css';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler, RadialLinearScale);
 
 const MapPage = () => {
   const { state, actions, refs } = useSubwayData();
 
-  // --- 기존 핸들러 로직 (수정 없음) ---
+  // 1. 역 선택 핸들러 (지도 중심 이동 로직 추가)
   const handleSelectStation = useCallback((name, line) => {
     const target = Object.values(state.lineData).flat().find(s => s.display_name === name && s.line === line);
     if (!target) return;
-    if (state.analysisMode === 'single') { actions.setTempSelectedStation(target); actions.setDetailData(null); }
-    else {
+
+    // --- 지도 중심 이동 추가 ---
+    if (refs.mapRef.current) {
+      const moveLatLon = new window.kakao.maps.LatLng(target.lat, target.lng);
+      refs.mapRef.current.setCenter(moveLatLon);
+    }
+
+    if (state.analysisMode === 'single') {
+      actions.setTempSelectedStation(target);
+      actions.setDetailData(null);
+    } else {
       actions.setTempCompareStations(prev => {
         const isExist = prev.find(p => p.display_name === name && p.line === line);
         if (isExist) return prev.filter(p => p.display_name !== name || p.line !== line);
         return prev.length >= 3 ? [...prev.slice(1), target] : [...prev, target];
       });
     }
-  }, [state.lineData, state.analysisMode, actions]);
+  }, [state.lineData, state.analysisMode, actions, refs]);
 
+  // 2. 단일 역 분석 실행
   const handleRunAnalysis = useCallback(async () => {
     if (!state.tempSelectedStation || !state.selectedMonth) return;
     try {
@@ -35,11 +46,13 @@ const MapPage = () => {
       const lineNum = state.tempSelectedStation.line_num;
       const targetMonth = state.selectedMonth.substring(0, 7);
       const targetYear = targetMonth.split('-')[0];
+      
       const [metricsRes, chartRes, heatmapRes] = await Promise.all([
         api.get('station/metrics', { params: { station_name: stnName, line_num: lineNum, target_year: targetYear } }),
         api.get('station/chart-data', { params: { station_name: stnName, line_num: lineNum, target_month: targetMonth } }),
         api.get('station/heatmap', { params: { station_name: stnName, target_month: targetMonth } })
       ]);
+      
       const m = metricsRes.data;
       if (m.error) return alert(m.error);
 
@@ -53,36 +66,64 @@ const MapPage = () => {
         hourly_pattern: chartRes.data,
         heatmap: Array.isArray(heatmapRes.data) ? heatmapRes.data : []
       });
-    } catch (error) { alert("데이터 분석 중 오류가 발생했습니다."); } finally { actions.setIsLoading(false); }
+    } catch (error) { 
+      alert("데이터 분석 중 오류가 발생했습니다."); 
+    } finally { 
+      actions.setIsLoading(false); 
+    }
   }, [state.tempSelectedStation, state.selectedMonth, actions]);
 
+  // 3. 비교 분석 실행 (데이터 박제 로직 적용)
   const startComparison = useCallback(() => {
     if (state.tempCompareStations.length < 2) return alert("비교할 역을 2개 이상 선택해주세요.");
     actions.setIsLoading(true);
-    const requests = state.tempCompareStations.map(s => api.get('station/metrics', { params: { station_name: s.display_name, line_num: s.line } }));
-    Promise.all(requests).then(res => actions.setCompareResults(res.map(r => r.data))).catch(err => console.error(err)).finally(() => actions.setIsLoading(false));
+    
+    const requests = state.tempCompareStations.map(s => 
+      api.get('station/metrics', { params: { station_name: s.display_name, line_num: s.line } })
+    );
+
+    Promise.all(requests)
+      .then(responses => {
+        // 분석 버튼을 누른 '그 시점'의 역 정보를 박제하여 저장
+        const resultsWithInfo = responses.map((res, idx) => ({
+          ...res.data,
+          stationInfo: state.tempCompareStations[idx] 
+        }));
+        actions.setCompareResults(resultsWithInfo);
+      })
+      .catch(err => console.error(err))
+      .finally(() => actions.setIsLoading(false));
   }, [state.tempCompareStations, actions]);
 
-  // --- 카카오 지도 오버레이 (수정 없음) ---
+  // 4. 지도 마커 업데이트
   useEffect(() => {
     if (!refs.mapRef.current || !state.mapLoaded) return;
     refs.overlaysRef.current.forEach(ol => ol.setMap(null));
     refs.overlaysRef.current = [];
+
     state.filteredStations.forEach(s => {
       const isSelected = state.analysisMode === 'single' 
         ? (state.tempSelectedStation?.display_name === s.display_name && state.tempSelectedStation?.line === s.line) 
         : state.tempCompareStations.some(p => p.display_name === s.display_name && p.line === s.line);
+      
       const color = LINE_COLORS[s.line] || '#333';
       const content = document.createElement('div');
       content.className = 'map-marker';
       content.style.cssText = `width: ${isSelected ? '20px' : '12px'}; height: ${isSelected ? '20px' : '12px'}; background: ${isSelected ? color : 'white'}; border: 2px solid ${color}; border-radius: 50%; cursor: pointer; z-index: ${isSelected ? 10 : 1};`;
+      
       content.onclick = () => handleSelectStation(s.display_name, s.line);
-      const overlay = new window.kakao.maps.CustomOverlay({ position: new window.kakao.maps.LatLng(s.lat, s.lng), content, yAnchor: 0.5 });
+      
+      const overlay = new window.kakao.maps.CustomOverlay({ 
+        position: new window.kakao.maps.LatLng(s.lat, s.lng), 
+        content, 
+        yAnchor: 0.5 
+      });
       overlay.setMap(refs.mapRef.current);
       refs.overlaysRef.current.push(overlay);
     });
   }, [state.filteredStations, state.tempSelectedStation, state.tempCompareStations, state.mapLoaded, state.analysisMode, handleSelectStation, refs]);
 
+  // 5. 시간대별 차트 데이터 처리
   const processedChartData = useMemo(() => {
     if (!state.detailData?.hourly_pattern || !Array.isArray(state.detailData.hourly_pattern) || state.detailData.hourly_pattern.length === 0) return { labels: [], datasets: [] };
     const sortedData = [...state.detailData.hourly_pattern].sort((a, b) => a.hour - b.hour);
@@ -120,7 +161,11 @@ const MapPage = () => {
         </header>
 
         <section className="top-visual-row">
-          <div id="map" className="map-card" ref={(el) => { if (el && state.mapLoaded && !refs.mapRef.current) { refs.mapRef.current = new window.kakao.maps.Map(el, { center: new window.kakao.maps.LatLng(37.5665, 127.02), level: 7 }); } }} />
+          <div id="map" className="map-card" ref={(el) => { 
+            if (el && state.mapLoaded && !refs.mapRef.current) { 
+              refs.mapRef.current = new window.kakao.maps.Map(el, { center: new window.kakao.maps.LatLng(37.5665, 127.02), level: 7 }); 
+            } 
+          }} />
           <div className="summary-overlay-card">
             <div className="analysis-tabs">
               <button className={`tab-btn ${state.analysisMode === 'single' ? 'active' : ''}`} onClick={() => actions.setAnalysisMode('single')}>단일 분석</button>
@@ -200,19 +245,9 @@ const MapPage = () => {
             </div>
           )}
 
+          {/* 6. 비교 분석 리포트 (수정된 컴포넌트 호출) */}
           {state.analysisMode === 'compare' && state.compareResults.length > 0 && (
-            <div className="compare-dashboard">
-              <div className="compare-title">⚖️ 후보지별 비교 분석</div>
-              <div className="row">
-                {state.compareResults.map((data, idx) => (
-                  <div key={idx} className="card half h-auto">
-                    <div className="compare-header-row"><h3>{state.tempCompareStations[idx]?.display_name}</h3><span className="line-badge" style={{ background: LINE_COLORS[state.tempCompareStations[idx]?.line] }}>{state.tempCompareStations[idx]?.line}호선</span></div>
-                    <div className="compare-info"><p>입지 등급: <strong>{data.location_grade}</strong></p><p>방어력: <strong>{(data.recovery_rate * 100).toFixed(1)}%</strong></p></div>
-                    <div className="compare-chart-wrapper"><Bar data={{ labels: ['17','18','19', '20', '21'], datasets: [{ data: [data.v2017,data.v2018,data.v2019, data.v2020, data.v2021], backgroundColor: LINE_COLORS[state.tempCompareStations[idx]?.line] }] }} options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} /></div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ComparisonReport results={state.compareResults} />
           )}
         </section>
       </main>
