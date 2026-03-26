@@ -44,9 +44,9 @@ async def get_station_metrics(
                 ROUND(AVG(CASE WHEN YEAR(base_date) = :year AND day_label = '평일' THEN (on_cnt + off_cnt) END), 0) AS weekday_avg,
                 ROUND(AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) - 
                       AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END), 0) AS diff_amount,
-                ROUND(AVG(CASE WHEN YEAR(base_date) = 2017 THEN (on_cnt + off_cnt) END), 0) AS v2017,
-                ROUND(AVG(CASE WHEN YEAR(base_date) = 2018 THEN (on_cnt + off_cnt) END), 0) AS v2018,
-                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2019,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2017 THEN (on_cnt + off_cnt) END), 0) AS v2017, 
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2018 THEN (on_cnt + off_cnt) END), 0) AS v2018, 
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2019, 
                 ROUND(AVG(CASE WHEN YEAR(base_date) = 2020 THEN (on_cnt + off_cnt) END), 0) AS v2020,
                 ROUND(AVG(CASE WHEN YEAR(base_date) = 2021 THEN (on_cnt + off_cnt) END), 0) AS v2021,
                 ROUND(STDDEV(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) / 
