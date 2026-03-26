@@ -186,6 +186,10 @@ const Map = () => {
   const handleSelectStation = useCallback((name, line) => {
     const target = Object.values(lineData).flat().find(s => s.display_name === name && s.line === line);
     if (!target) return;
+    if (mapRef.current) {
+      const moveLatLon = new window.kakao.maps.LatLng(target.lat, target.lng);
+      mapRef.current.panTo(moveLatLon);
+    }
     if (analysisMode === 'single') { setTempSelectedStation(target); setDetailData(null); }
     else {
       setTempCompareStations(prev => {
