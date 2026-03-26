@@ -138,7 +138,7 @@ async def get_station_metrics(
             "commercial_type": str(p_row.get('area_type', '복합 상권')),
             "insight_text": insight,
             "v2017": int(a_row['v2017'] or 0), 
-            "v2018": int(a_row['v2018'] or 0), 
+            "v2018": int(a_row['v2018'] or 0) // 2, 
             "v2019": int(a_row['v2019'] or 0), 
             "v2020": int(a_row['v2020'] or 0),
             "v2021": int(a_row['v2021'] or 0),
@@ -160,8 +160,9 @@ async def get_stations():
                 s.line_num, 
                 p.위도 as lat, 
                 p.경도 as lng
-            FROM `03_mart_station_spatial` s
-            JOIN `00_위치` p ON REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', '')
+            FROM (SELECT stn_name, line_num FROM `03_mart_station_spatial` GROUP BY stn_name, line_num) as s
+            JOIN `00_위치` as p 
+            ON (REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', ''))
             GROUP BY s.stn_name, s.line_num
         """)
         with engine.connect() as conn:

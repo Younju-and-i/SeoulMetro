@@ -140,7 +140,13 @@ const Map = () => {
     setIsLoading(true);
     const requests = tempCompareStations.map(s => api.get('station/metrics', { params: { station_name: s.display_name, line_num: s.line } }));
     Promise.all(requests)
-      .then(res => setCompareResults(res.map(r => r.data)))
+      .then(responses => {
+      const resultsWithInfo = responses.map((res, idx) => ({
+        ...res.data,
+        stationInfo: tempCompareStations[idx]
+      }));
+      setCompareResults(resultsWithInfo);
+    })
       .catch(err => console.error(err))
       .finally(() => setIsLoading(false));
   }, [tempCompareStations]);
@@ -367,7 +373,7 @@ const Map = () => {
                 <div className="card">
                   <h3>🛡️ 위기 대응력 (COVID 데이터)</h3>
                   <div className="chart-h" style={{height: '200px'}}>
-                    <Line data={{ labels: ['Pre-COVID (19)', 'Shock (20)'], datasets: [{ data: [detailData.metrics.v2019, detailData.metrics.v2020], borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 200000 } } }} />
+                    <Line data={{ labels: ['Pre-COVID (19)', 'Shock (20)'], datasets: [{ data: [detailData.metrics.v2019, detailData.metrics.v2020], borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 210000 } } }} />
                   </div>
                   <div className="recovery-progress-container">
                     <div className="progress-info"><span>Shock Defense Level</span><span>{Math.round((detailData.metrics.recovery_rate || 0) * 100)}%</span></div>
@@ -379,7 +385,6 @@ const Map = () => {
               </div>
             </div>
           )}
-
           {analysisMode === 'compare' && compareResults.length > 0 && (
             <div className="compare-dashboard">
               <div className="compare-title">⚖️ 후보지별 비교 분석</div>
@@ -387,15 +392,27 @@ const Map = () => {
                 {compareResults.map((data, idx) => (
                   <div key={idx} className="card half h-auto">
                     <div className="compare-header-row">
-                      <h3>{tempCompareStations[idx]?.display_name}</h3>
-                      <span className="line-badge" style={{ background: LINE_COLORS[tempCompareStations[idx]?.line] }}>{tempCompareStations[idx]?.line}호선</span>
+                      {/* tempCompareStations가 아닌 data 안에 저장된 stationInfo를 사용 */}
+                      <h3>{data.stationInfo?.display_name}</h3>
+                      <span className="line-badge" style={{ background: LINE_COLORS[data.stationInfo?.line] }}>
+                        {data.stationInfo?.line}호선
+                      </span>
                     </div>
                     <div className="compare-info">
                       <p>입지 등급: <strong>{data.location_grade}</strong></p>
                       <p>방어력: <strong>{(data.recovery_rate * 100).toFixed(1)}%</strong></p>
                     </div>
                     <div className="compare-chart-wrapper">
-                      <Bar data={{ labels: ['17','18','19', '20', '21'], datasets: [{ data: [data.v2017,data.v2018,data.v2019, data.v2020, data.v2021], backgroundColor: LINE_COLORS[tempCompareStations[idx]?.line] }] }} options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+                      <Bar 
+                        data={{ 
+                          labels: ['17','18','19', '20', '21'], 
+                          datasets: [{ 
+                            data: [data.v2017, data.v2018, data.v2019, data.v2020, data.v2021], 
+                            backgroundColor: LINE_COLORS[data.stationInfo?.line] 
+                          }] 
+                        }} 
+                        options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} 
+                      />
                     </div>
                   </div>
                 ))}
