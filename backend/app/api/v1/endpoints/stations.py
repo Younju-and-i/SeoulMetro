@@ -17,7 +17,7 @@ def format_station_name(name: str) -> str:
 async def get_available_dates():
     try:
         engine = get_engine()
-        query = text("SELECT DISTINCT base_ym FROM `03_mart_growth_trend` ORDER BY base_ym DESC")
+        query = text("SELECT DISTINCT LEFT(base_ym, 7) as base_ym FROM `03_mart_growth_trend` ORDER BY base_ym DESC")
         with engine.connect() as conn:
             df = pd.read_sql(query, conn)
         return df['base_ym'].tolist()
@@ -44,11 +44,11 @@ async def get_station_metrics(
                 ROUND(AVG(CASE WHEN YEAR(base_date) = :year AND day_label = '평일' THEN (on_cnt + off_cnt) END), 0) AS weekday_avg,
                 ROUND(AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) - 
                       AVG(CASE WHEN YEAR(base_date) = :year - 1 THEN (on_cnt + off_cnt) END), 0) AS diff_amount,
-                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2017,
-                ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2018,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2017 THEN (on_cnt + off_cnt) END), 0) AS v2017,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2018 THEN (on_cnt + off_cnt) END), 0) AS v2018,
                 ROUND(AVG(CASE WHEN YEAR(base_date) = 2019 THEN (on_cnt + off_cnt) END), 0) AS v2019,
                 ROUND(AVG(CASE WHEN YEAR(base_date) = 2020 THEN (on_cnt + off_cnt) END), 0) AS v2020,
-                ROUND(AVG(CASE WHEN YEAR(base_date) = 2020 THEN (on_cnt + off_cnt) END), 0) AS v2021,
+                ROUND(AVG(CASE WHEN YEAR(base_date) = 2021 THEN (on_cnt + off_cnt) END), 0) AS v2021,
                 ROUND(STDDEV(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END) / 
                       NULLIF(AVG(CASE WHEN YEAR(base_date) = :year THEN (on_cnt + off_cnt) END), 0), 3) AS volatility,
                 CASE 
@@ -138,7 +138,7 @@ async def get_station_metrics(
             "commercial_type": str(p_row.get('area_type', '복합 상권')),
             "insight_text": insight,
             "v2017": int(a_row['v2017'] or 0), 
-            "v2018": int(a_row['v2018'] or 0), 
+            "v2018": int(a_row['v2018'] or 0) // 2, 
             "v2019": int(a_row['v2019'] or 0), 
             "v2020": int(a_row['v2020'] or 0),
             "v2021": int(a_row['v2021'] or 0),

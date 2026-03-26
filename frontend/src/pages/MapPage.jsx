@@ -140,7 +140,13 @@ const Map = () => {
     setIsLoading(true);
     const requests = tempCompareStations.map(s => api.get('station/metrics', { params: { station_name: s.display_name, line_num: s.line } }));
     Promise.all(requests)
-      .then(res => setCompareResults(res.map(r => r.data)))
+      .then(responses => {
+      const resultsWithInfo = responses.map((res, idx) => ({
+        ...res.data,
+        stationInfo: tempCompareStations[idx]
+      }));
+      setCompareResults(resultsWithInfo);
+    })
       .catch(err => console.error(err))
       .finally(() => setIsLoading(false));
   }, [tempCompareStations]);
@@ -186,6 +192,10 @@ const Map = () => {
   const handleSelectStation = useCallback((name, line) => {
     const target = Object.values(lineData).flat().find(s => s.display_name === name && s.line === line);
     if (!target) return;
+    if (mapRef.current) {
+      const moveLatLon = new window.kakao.maps.LatLng(target.lat, target.lng);
+      mapRef.current.panTo(moveLatLon);
+    }
     if (analysisMode === 'single') { setTempSelectedStation(target); setDetailData(null); }
     else {
       setTempCompareStations(prev => {
@@ -375,7 +385,6 @@ const Map = () => {
               </div>
             </div>
           )}
-
           {analysisMode === 'compare' && compareResults.length > 0 && (
             <div className="compare-dashboard">
               <div className="compare-title">⚖️ 후보지별 비교 분석</div>
@@ -383,15 +392,27 @@ const Map = () => {
                 {compareResults.map((data, idx) => (
                   <div key={idx} className="card half h-auto">
                     <div className="compare-header-row">
-                      <h3>{tempCompareStations[idx]?.display_name}</h3>
-                      <span className="line-badge" style={{ background: LINE_COLORS[tempCompareStations[idx]?.line] }}>{tempCompareStations[idx]?.line}호선</span>
+                      {/* tempCompareStations가 아닌 data 안에 저장된 stationInfo를 사용 */}
+                      <h3>{data.stationInfo?.display_name}</h3>
+                      <span className="line-badge" style={{ background: LINE_COLORS[data.stationInfo?.line] }}>
+                        {data.stationInfo?.line}호선
+                      </span>
                     </div>
                     <div className="compare-info">
                       <p>입지 등급: <strong>{data.location_grade}</strong></p>
                       <p>방어력: <strong>{(data.recovery_rate * 100).toFixed(1)}%</strong></p>
                     </div>
                     <div className="compare-chart-wrapper">
-                      <Bar data={{ labels: ['17','18','19', '20', '21'], datasets: [{ data: [data.v2017,data.v2018,data.v2019, data.v2020, data.v2021], backgroundColor: LINE_COLORS[tempCompareStations[idx]?.line] }] }} options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+                      <Bar 
+                        data={{ 
+                          labels: ['17','18','19', '20', '21'], 
+                          datasets: [{ 
+                            data: [data.v2017, data.v2018, data.v2019, data.v2020, data.v2021], 
+                            backgroundColor: LINE_COLORS[data.stationInfo?.line] 
+                          }] 
+                        }} 
+                        options={{ maintainAspectRatio: false, plugins: { legend: { display: false } } }} 
+                      />
                     </div>
                   </div>
                 ))}
