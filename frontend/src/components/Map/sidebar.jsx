@@ -1,65 +1,31 @@
-// (좌측 검색 및 목록)
+import React from 'react';
 import { LINE_COLORS } from '@/constants/subway';
 
-const Sidebar = ({ state, actions }) => {
-  const { 
-    selectedMonth, availableMonths, selectedDay, 
-    selectedLine, searchTerm, filteredStations, analysisMode,
-    selectedStation, compareStations 
-  } = state;
-
-  const { 
-    setSelectedMonth, setSelectedDay, setSelectedLine, 
-    setSearchTerm, handleSelectStation 
-  } = actions;
-
+const Sidebar = ({ state, actions, onSelectStation }) => {
   return (
     <aside className="sidebar">
       <h2 className="logo">Semicolon <span className="point">;</span></h2>
       <div className="filter-box">
         <label>데이터 기준월</label>
-        <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
-          {availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
+        <select value={state.selectedMonth} onChange={(e) => actions.setSelectedMonth(e.target.value)}>
+          {state.availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
-        
-        <label>분석 기준일</label>
-        <select value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)}>
-          {Array.from({ length: 31 }, (_, i) => {
-            const day = String(i + 1).padStart(2, '0');
-            return <option key={day} value={day}>{day}일</option>;
-          })}
-        </select>
-
         <label>노선 선택</label>
-        <select value={selectedLine} onChange={(e) => setSelectedLine(e.target.value)}>
+        <select value={state.selectedLine} onChange={(e) => actions.setSelectedLine(e.target.value)}>
           <option value="전체">전체 노선</option>
           {Object.keys(LINE_COLORS).map(n => <option key={n} value={n}>{n}호선</option>)}
         </select>
-        <input 
-          type="text" 
-          placeholder="역 검색..." 
-          value={searchTerm} 
-          onChange={(e) => setSearchTerm(e.target.value)} 
-        />
+        <input type="text" placeholder="역 검색..." value={state.searchTerm} onChange={(e) => actions.setSearchTerm(e.target.value)} />
       </div>
-
       <div className="mini-station-list">
-        {filteredStations.map((s) => {
-          const isSelected = analysisMode === 'single' 
-            ? selectedStation?.역명 === s.역명 && selectedStation?.line === s.line
-            : compareStations.some(p => p.역명 === s.역명 && p.line === s.line);
-
-          return (
-            <div 
-              key={`${s.역명}-${s.line}`} 
-              className={`mini-item ${isSelected ? 'active' : ''}`} 
-              onClick={() => handleSelectStation(s.역명, s.line)}
-            >
-              <span className="dot" style={{backgroundColor: LINE_COLORS[s.line]}}></span>
-              {s.역명} <small>({s.line}호선)</small>
-            </div>
-          );
-        })}
+        {state.filteredStations.map((s) => (
+          <div key={`${s.display_name}-${s.line}`} 
+               className={`mini-item ${ (state.analysisMode==='single' ? state.tempSelectedStation?.display_name===s.display_name && state.tempSelectedStation?.line===s.line : state.tempCompareStations.some(p=>p.display_name===s.display_name && p.line===s.line)) ? 'active' : ''}`}
+               onClick={() => onSelectStation(s.display_name, s.line)}>
+            <span className="dot" style={{ backgroundColor: LINE_COLORS[s.line] }}></span>
+            {s.display_name} <small>({s.line}호선)</small>
+          </div>
+        ))}
       </div>
     </aside>
   );
