@@ -363,7 +363,7 @@ const Map = () => {
                 <div className="card">
                   <h3>🛡️ 위기 대응력 (COVID 데이터)</h3>
                   <div className="chart-h" style={{height: '200px'}}>
-                    <Line data={{ labels: ['Pre-COVID (19)', 'Shock (20)'], datasets: [{ data: [detailData.metrics.v2019, detailData.metrics.v2020], borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 200000 } } }} />
+                    <Line data={{ labels: ['Pre-COVID (19)', 'Shock (20)'], datasets: [{ data: [detailData.metrics.v2019, detailData.metrics.v2020], borderColor: '#ff4d4f', backgroundColor: 'rgba(255, 77, 79, 0.1)', fill: true }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 210000 } } }} />
                   </div>
                   <div className="recovery-progress-container">
                     <div className="progress-info"><span>Shock Defense Level</span><span>{Math.round((detailData.metrics.recovery_rate || 0) * 100)}%</span></div>
