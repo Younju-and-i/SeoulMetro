@@ -151,24 +151,44 @@ async def get_station_metrics(
 
 # 3. 전체 역 목록
 @router.get("/stations")
-async def get_stations():
+async def get_stations(target_year: int = Query(2021)):
     try:
         engine = get_engine()
+        # 핵심 수정: r 테이블(franchise_recommend)에서 실제 점수 컬럼들을 가져옵니다.
         query = text("""
             SELECT 
                 s.stn_name as display_name, 
                 s.line_num, 
-                p.위도 as lat, 
-                p.경도 as lng
+                MAX(p.위도) as lat, 
+                MAX(p.경도) as lng,
+                MAX(prof.area_type) as area_type,
+                -- 실제 점수 기반 평균 산출
+                AVG(IFNULL(r.total_traffic_score, 0) + IFNULL(r.office_score, 0) + IFNULL(r.night_life_score, 0)) / 3 as avg_score
             FROM (SELECT stn_name, line_num FROM `03_mart_station_spatial` GROUP BY stn_name, line_num) as s
             JOIN `00_위치` as p 
-            ON (REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', ''))
+                ON REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(p.station_clean), '역', '')
+            LEFT JOIN `03_mart_station_profile` as prof 
+                ON REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(prof.stn_name), '역', '')
+            LEFT JOIN `03_mart_franchise_recommend` as r
+                ON REPLACE(TRIM(s.stn_name), '역', '') = REPLACE(TRIM(r.stn_name), '역', '')
+                AND YEAR(r.base_ym) = :year
             GROUP BY s.stn_name, s.line_num
         """)
         with engine.connect() as conn:
-            df = pd.read_sql(query, conn)
+            df = pd.read_sql(query, conn, params={"year": target_year})
+
+        def calculate_grade(score):
+            if pd.isna(score) or score is None: return "B"
+            if score >= 19.0: return "S"
+            if score >= 16.5: return "A"
+            return "B"
+
+        df['location_grade'] = df['avg_score'].apply(calculate_grade)
+        df = df.where(pd.notnull(df), None)
+        
         return {"data": df.to_dict(orient='records')}
     except Exception as e:
+        print(f"Stations Error: {e}")
         return {"data": [], "error": str(e)}
 
 # 4. 차트 데이터 (필요할 때만 호출)
