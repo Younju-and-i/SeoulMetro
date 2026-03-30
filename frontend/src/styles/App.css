@@ -2,32 +2,57 @@
 .consulting-layout {
   display: flex;
   background: #f4f7f6;
-  height: 100vh;
-  overflow: hidden;
+  height: 100vh;           /* 브라우저 화면 높이에 딱 맞춤 */
+  width: 100vw;
+  overflow: hidden;        /* 바깥쪽 스크롤은 금지 */
   font-family: 'Pretendard', sans-serif;
-}
-
-/* 2. 사이드바 스타일 */
-.sidebar {
-  width: 280px;
-  background: #1c2a48;
-  color: white;
-  padding: 30px 20px;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 .logo { font-size: 24px; font-weight: 800; margin-bottom: 30px; }
 .logo .point { color: #007bff; }
 
-.filter-box { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+/* 2. 사이드바 스타일 */
+.sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: #1c2a48;
+  color: white;
+  padding: 30px 20px;
+  height: 100vh;           /* 부모와 동일하게 100% 유지 */
+  display: flex;
+  flex-direction: column;  /* 로고, 필터, 목록을 세로로 배치 */
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+/* 필터 박스 (고정 높이) */
+.filter-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-shrink: 0; /* 필터는 높이를 유지함 */
+}
+
+.mini-station-list {
+  flex: 1;            /* 남은 모든 수직 공간을 차지 */
+  overflow-y: auto;   /* 내용이 많으면 내부 스크롤 발생 */
+  padding-right: 5px;
+  margin-top: 10px;
+  
+}
+/* 스크롤바 디자인 (선택 사항: 네이비 톤에 맞게) */
+.mini-station-list::-webkit-scrollbar {
+  width: 5px;
+}
+.mini-station-list::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border-radius: 10px;
+}
+
 .filter-box label { font-size: 11px; color: #a0aec0; font-weight: 700; }
 .filter-box select, .filter-box input { 
   background: #2d3748; border: none; padding: 12px; border-radius: 8px; color: white; outline: none; 
 }
 
-.mini-station-list { height: calc(100vh - 300px); overflow-y: auto; padding-right: 5px; }
 .mini-item { padding: 12px; border-radius: 8px; font-size: 14px; cursor: pointer; display: flex; align-items: center; margin-bottom: 4px; transition: 0.2s; }
 .mini-item:hover { background: rgba(255,255,255,0.1); }
 .mini-item.active { background: #3182ce; font-weight: bold; }
@@ -42,7 +67,7 @@
   display: flex;
   flex-direction: column;
 }
-.main-header { margin-bottom: 30px; display: flex; justify-content: space-between; alignItems: center; }
+.main-header { margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
 .main-header h1 { font-size: 32px; color: #1a202c; font-weight: 800; }
 .header-info { color: #718096; font-size: 15px; }
 
@@ -123,7 +148,7 @@
   font-weight: bold;
   font-size: 12px;
   color: #888;
-  marginBottom: 8px;
+  margin-bottom: 8px;
 }
 .heatmap-grid {
   display: grid;
@@ -147,7 +172,7 @@
   position: relative;
 }
 .heatmap-date { color: #333; font-weight: bold; }
-.heatmap-label { fontSize: 9px; color: #6e6b6b; margin-top: 2px; }
+.heatmap-label { font-size: 9px; color: #6e6b6b; margin-top: 2px; }
 
 /* 단일 분석 상단 요약 */
 .summary-title { font-size: 18px; font-weight: 700; color: #1c2a48; }
@@ -183,3 +208,113 @@
 .progress-info { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; color: #888; }
 .progress-bar-bg { width: 100%; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
 .progress-bar-fill { height: 100%; transition: width 0.5s ease; }
+
+/* --- 반응형 레이아웃 수정 --- */
+
+/* 1. 기본 레이아웃 수정 (높이 고정 해제) */
+.consulting-layout {
+  display: flex;
+  background: #f4f7f6;
+  min-height: 100vh; /* height 대신 min-height 사용 */
+  height: auto; 
+  overflow-y: auto; /* 전체 스크롤 허용 */
+  flex-direction: row;
+}
+
+/* 2. 사이드바 반응형 */
+.sidebar {
+  width: 280px;
+  min-width: 280px;
+  flex-shrink: 0;
+  height: 100vh;
+  position: sticky; /* 스크롤 시 고정 */
+  top: 0;
+}
+
+/* 3. 메인 콘텐츠 반응형 */
+.report-main {
+  flex: 1;
+  padding: 20px;
+  height: auto; /* 높이 고정 해제 */
+  overflow: visible;
+}
+
+/* 4. 그리드 및 카드 구조 최적화 */
+.top-visual-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 20px;
+  height: auto; /* 고정 높이 제거 */
+  min-height: 400px;
+}
+
+.map-card {
+  min-height: 400px; /* 지도가 너무 작아지지 않게 */
+}
+
+/* 5. KPI 그리드 반응형 */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); /* 너비에 따라 자동 줄바꿈 */
+  gap: 15px;
+}
+
+/* --- 미디어 쿼리 (태블릿 & 모바일) --- */
+
+/* 태블릿 이하 (1024px 미만) */
+@media (max-width: 1024px) {
+  .consulting-layout {
+    flex-direction: column; /* 사이드바가 위로 올라감 */
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: relative;
+    padding: 20px;
+  }
+
+  .mini-station-list {
+    height: 200px; /* 모바일에서는 리스트 높이 축소 */
+  }
+
+  .top-visual-row {
+    grid-template-columns: 1fr; /* 지도가 상단, 요약이 하단으로 */
+  }
+
+  .grid-2 {
+    grid-template-columns: 1fr; /* 대시보드 2열을 1열로 */
+  }
+}
+
+/* 모바일 (768px 미만) */
+@media (max-width: 768px) {
+  .main-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+
+  .score-summary-card {
+    width: 100%;
+    border-radius: 15px;
+    justify-content: space-between;
+  }
+
+  .main-header h1 {
+    font-size: 24px;
+  }
+
+  .card {
+    height: auto; /* 모바일에서 카드 높이 자동 조절 */
+    min-height: 300px;
+  }
+
+  .recommendation-list {
+    flex-direction: column; /* 추천 카드를 세로로 */
+  }
+
+  .heatmap-header, .heatmap-grid {
+    font-size: 10px; /* 히트맵 글자 크기 축소 */
+  }
+}

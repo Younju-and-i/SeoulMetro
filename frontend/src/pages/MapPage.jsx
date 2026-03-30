@@ -77,9 +77,13 @@ const MapPage = () => {
   const startComparison = useCallback(() => {
     if (state.tempCompareStations.length < 2) return alert("비교할 역을 2개 이상 선택해주세요.");
     actions.setIsLoading(true);
-    
+    const targetYear = state.selectedMonth.split('-')[0];
     const requests = state.tempCompareStations.map(s => 
-      api.get('station/metrics', { params: { station_name: s.display_name, line_num: s.line } })
+    api.get('station/metrics', { 
+      params: { 
+        station_name: s.display_name, 
+        line_num: s.line,
+        target_year: targetYear } })
     );
 
     Promise.all(requests)
@@ -93,7 +97,7 @@ const MapPage = () => {
       })
       .catch(err => console.error(err))
       .finally(() => actions.setIsLoading(false));
-  }, [state.tempCompareStations, actions]);
+  }, [state.tempCompareStations, state.selectedMonth, actions]);
 
   // 4. 지도 마커 업데이트
   useEffect(() => {
